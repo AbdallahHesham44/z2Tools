@@ -158,11 +158,11 @@ if uploaded_file is not None:
             
             # Memory-aware progress callback
             progress_lock = threading.Lock()
-            last_gc_time = time.time()
+            
+            # Use a mutable object to share state between functions
+            gc_state = {'last_gc_time': time.time()}
             
             def update_progress(progress, total, batch_num, matched_count=0, unmatched_count=0):
-                nonlocal last_gc_time
-                
                 with progress_lock:
                     try:
                         percentage = min(progress / total, 1.0) if total > 0 else 0
@@ -180,9 +180,9 @@ if uploaded_file is not None:
                         
                         # Force garbage collection every 5 batches or 30 seconds
                         current_time = time.time()
-                        if batch_num % 5 == 0 or (current_time - last_gc_time) > 30:
+                        if batch_num % 5 == 0 or (current_time - gc_state['last_gc_time']) > 30:
                             gc.collect()
-                            last_gc_time = current_time
+                            gc_state['last_gc_time'] = current_time
                             
                     except Exception as e:
                         st.error(f"Progress update error: {e}")
