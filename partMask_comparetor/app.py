@@ -10,12 +10,12 @@ def get_consecutive_diff(part, masked):
             diff += part[i]
         else:
             if in_diff:
-                break  # stop collecting when match resumes
+                break  # stop collecting when characters match again
         i += 1
 
-    # if masked is shorter, continue adding remaining from part
+    # If still in diff and MaskedText is shorter or ended
     if in_diff and i < len(part):
-        while i < len(part):
+        while i < len(part) and (i >= len(masked) or part[i] != masked[i]):
             diff += part[i]
             i += 1
 
@@ -24,24 +24,25 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(page_title="Part Number Diff Tool", layout="wide")
-st.title("🔍 Consecutive Difference Extractor")
+st.set_page_config(page_title="Part Number Difference Tool", layout="wide")
+st.title("🔍 Part Number Difference Extractor (Full Character Support)")
 
 # Upload Excel file
 uploaded_file = st.file_uploader("📤 Upload Excel file with PartNumber and MaskedText", type=["xlsx"])
 
 if uploaded_file:
     try:
+        # Load Excel file
         df = pd.read_excel(uploaded_file)
         st.success(f"✅ File loaded with {len(df)} rows.")
 
-        # Clean inputs
+        # Clean and preprocess
         for col in ['PartNumber', 'MaskedText']:
             if col in df.columns:
                 df[col] = df[col].fillna('').astype(str).str.strip()
         df['MaskedText'] = df['MaskedText'].str.rstrip('-')
 
-        # Function to extract consecutive differing characters
+        # Function to get first sequence of mismatching characters
         def get_consecutive_diff(part, masked):
             diff = ''
             i = 0
@@ -54,7 +55,7 @@ if uploaded_file:
                     diff += part[i]
                 else:
                     if in_diff:
-                        break  # stop at first resumed match
+                        break
                 i += 1
 
             if in_diff and i < len(part):
@@ -75,11 +76,11 @@ if uploaded_file:
             axis=1
         )
 
-        # Preview
+        # Show results
         st.subheader("📋 Preview of Differences")
-        st.dataframe(df[['PartNumber', 'MaskedText', 'length', 'diff_char']].head())
+        st.dataframe(df[['PartNumber', 'MaskedText', 'length', 'diff_char']].head(20))
 
-        # Download
+        # Export
         to_download = io.BytesIO()
         df.to_excel(to_download, index=False)
         to_download.seek(0)
