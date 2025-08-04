@@ -52,7 +52,12 @@ if uploaded_file:
             lambda row: get_diff_chars(row['PartNumber'], row['MaskedText']),
             axis=1
         )
-
+        for suffix_item in suffix_list:
+            if pd.notna(suffix_item) and suffix_item != '':
+                mask = (df['suffix_value'] == 'no_diff') & (df['PartNumber'].str.endswith(suffix_item, na=False))
+                if mask.any():
+                    df.loc[mask, 'masked_code'] = df.loc[mask, 'PartNumber'].str[:-len(suffix_item)]
+                    df.loc[mask, 'suffix_value'] = suffix_item
         # Show preview
         st.subheader("📋 Differences Found")
         st.dataframe(df[['PartNumber', 'MaskedText', 'length', 'diff_char']].head(20))
