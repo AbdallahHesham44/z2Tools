@@ -1,15 +1,3 @@
-def get_diff_chars(part, masked):
-    diff = ''
-    max_len = max(len(part), len(masked))
-
-    for i in range(max_len):
-        p_char = part[i] if i < len(part) else ''
-        m_char = masked[i] if i < len(masked) else ''
-
-        if p_char != m_char:
-            diff += p_char
-
-    return diff if diff else 'no_diff'
 import streamlit as st
 import pandas as pd
 import io
@@ -30,20 +18,18 @@ if uploaded_file:
                 df[col] = df[col].fillna('').astype(str).str.strip()
         df['MaskedText'] = df['MaskedText'].str.rstrip('-')
 
-        # Core diff function
+        # Step 1: Character-level diff function
         def get_diff_chars(part, masked):
             diff = ''
             max_len = max(len(part), len(masked))
-
             for i in range(max_len):
                 p_char = part[i] if i < len(part) else ''
                 m_char = masked[i] if i < len(masked) else ''
                 if p_char != m_char:
                     diff += p_char
-
             return diff if diff else 'no_diff'
 
-        # Process
+        # Step 2: Generate diff_char and length flag
         df['length'] = df.apply(
             lambda row: 'lengthIssue' if len(row['MaskedText']) > len(row['PartNumber']) else 'lengthApprove',
             axis=1
@@ -52,17 +38,24 @@ if uploaded_file:
             lambda row: get_diff_chars(row['PartNumber'], row['MaskedText']),
             axis=1
         )
+
+        # Step 3: Optional masked_code reconstruction from known suffix patterns
+        df['masked_code'] = ''
+        suffix_list = df.loc[df['diff_char'] != 'no_diff', 'diff_char'].dropna().unique().tolist()
+        suffix_list = sorted(suffix_list, key=len, reverse=True)  # longest first
+
         for suffix_item in suffix_list:
-            if pd.notna(suffix_item) and suffix_item != '':
-                mask = (df['suffix_value'] == 'no_diff') & (df['PartNumber'].str.endswith(suffix_item, na=False))
+            if suffix_item:
+                mask = (df['diff_char'] == 'no_diff') & (df['PartNumber'].str.endswith(suffix_item, na=False))
                 if mask.any():
                     df.loc[mask, 'masked_code'] = df.loc[mask, 'PartNumber'].str[:-len(suffix_item)]
-                    df.loc[mask, 'suffix_value'] = suffix_item
+                    df.loc[mask, 'diff_char'] = suffix_item  # update diff_char with matched suffix
+
         # Show preview
         st.subheader("📋 Differences Found")
-        st.dataframe(df[['PartNumber', 'MaskedText', 'length', 'diff_char']].head(20))
+        st.dataframe(df[['PartNumber', 'MaskedText', 'length', 'diff_char', 'masked_code']].head(20))
 
-        # Download
+        # Download results
         to_download = io.BytesIO()
         df.to_excel(to_download, index=False)
         to_download.seek(0)
