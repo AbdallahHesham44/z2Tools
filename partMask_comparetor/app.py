@@ -13,13 +13,18 @@ def get_consecutive_diff(part, masked):
                 break  # stop collecting when characters match again
         i += 1
 
-    # If still in diff and MaskedText is shorter or ended
-    if in_diff and i < len(part):
+    # ✅ If the masked is a perfect prefix, and part has extras:
+    if not in_diff and len(part) > len(masked):
+        diff = part[len(masked):]
+
+    # ✅ If already in diff and part still has different trailing chars
+    elif in_diff and i < len(part):
         while i < len(part) and (i >= len(masked) or part[i] != masked[i]):
             diff += part[i]
             i += 1
 
     return diff if diff else 'no_diff'
+
 import streamlit as st
 import pandas as pd
 import io
