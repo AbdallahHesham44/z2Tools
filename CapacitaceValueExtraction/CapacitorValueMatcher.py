@@ -142,8 +142,8 @@ class CapacitorValueMatcher:
     def generate_unit_variants(self, pf_value):
         variants = [(pf_value, 'pf')]
         if pf_value != 0:
-            uf_value = pf_value / 1000000
-            variants.append((uf_value, 'uf'))
+            uf_value = pf_value / 1
+            variants.append((uf_value, 'µf'))
         return variants
 
     def process_single_row(self, row_data):
