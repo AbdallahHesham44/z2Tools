@@ -5,7 +5,8 @@ import os
 import tempfile
 from io import BytesIO
 
-def split_excel_file(df, rows_per_file, base_name, progress_callback):
+def split_excel_file(df, selected_columns, rows_per_file, base_name, progress_callback):
+    df = df[selected_columns]  # keep only selected columns
     output_files = []
     total_rows = len(df)
     num_files = (total_rows + rows_per_file - 1) // rows_per_file
@@ -32,35 +33,44 @@ def compress_files_to_zip(file_list):
     return zip_buffer
 
 # --- Streamlit UI ---
-st.title("📊 Excel Splitter & Downloader")
+st.title("📊 Excel Splitter & Column Selector")
 
 uploaded_file = st.file_uploader("Upload a large Excel file (.xlsx)", type=["xlsx"])
 
-rows_per_file = st.number_input("Number of rows per output file", min_value=1, value=5000, step=100)
-
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
+    st.success(f"✅ File loaded with {df.shape[0]} rows and {df.shape[1]} columns.")
+
+    # Select columns
+    selected_columns = st.multiselect("Select columns to include in output files:", options=df.columns.tolist(), default=df.columns.tolist())
+
+    # Rows per file
+    rows_per_file = st.number_input("Number of rows per output file", min_value=1, value=5000, step=100)
+
     base_name = os.path.splitext(uploaded_file.name)[0]
 
     if st.button("Split & Download"):
-        st.info(f"Splitting `{uploaded_file.name}` into parts of {rows_per_file} rows...")
+        if not selected_columns:
+            st.warning("⚠️ Please select at least one column.")
+        else:
+            st.info(f"Splitting `{uploaded_file.name}` by {rows_per_file} rows with selected columns...")
 
-        progress_bar = st.progress(0)
+            progress_bar = st.progress(0)
 
-        # Split Excel and get list of temporary file paths
-        output_files = split_excel_file(df, rows_per_file, base_name, progress_callback=progress_bar.progress)
+            # Split Excel and get list of temporary file paths
+            output_files = split_excel_file(df, selected_columns, rows_per_file, base_name, progress_callback=progress_bar.progress)
 
-        # Compress all parts into a single zip file
-        zip_buffer = compress_files_to_zip(output_files)
+            # Compress all parts into a single zip file
+            zip_buffer = compress_files_to_zip(output_files)
 
-        # Clean up temporary files
-        for _, path in output_files:
-            os.remove(path)
+            # Clean up temporary files
+            for _, path in output_files:
+                os.remove(path)
 
-        st.success("✅ Done! Download your split files below.")
-        st.download_button(
-            label="📥 Download ZIP",
-            data=zip_buffer,
-            file_name=f"{base_name}_split_files.zip",
-            mime="application/zip"
-        )
+            st.success("✅ Done! Download your split files below.")
+            st.download_button(
+                label="📥 Download ZIP",
+                data=zip_buffer,
+                file_name=f"{base_name}_split_files.zip",
+                mime="application/zip"
+            )
