@@ -1,86 +1,52 @@
 import streamlit as st
 import pandas as pd
-import requests
 from io import BytesIO
-from github import Github
 from series_processing import compare_requested_series
+from github_utils import load_excel_from_github, save_excel_to_github, modify_master_or_rules
 
-# ======================
-# GitHub setup
-# ======================
-GITHUB_REPO = "AbdallahHesham44/z2Tools"
-GITHUB_BRANCH = "main"
-TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+REPO_NAME = "AbdallahHesham44/z2Tools"
+MASTER_PATH = "Serise/MasterSeriesHistory.xlsx"
+RULES_PATH = "Serise/SampleSeriesRules.xlsx"
 
-def load_from_github(path):
-    url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{path}"
-    response = requests.get(url)
-    response.raise_for_status()
-    return BytesIO(response.content)
-
-def upload_to_github(path, content, message):
-    if not TOKEN:
-        st.error("GitHub token is missing in secrets.")
-        return
-    g = Github(TOKEN)
-    repo = g.get_repo(GITHUB_REPO)
-    try:
-        file_content = repo.get_contents(path, ref=GITHUB_BRANCH)
-        repo.update_file(file_content.path, message, content, file_content.sha, branch=GITHUB_BRANCH)
-    except:
-        repo.create_file(path, message, content, branch=GITHUB_BRANCH)
-
-# ======================
-# Streamlit UI
-# ======================
 st.title("📊 Series Processing Tool")
 
-# 1️⃣ Download Template files
-st.subheader("📥 Download Templates")
-templates = {
-    "TemplateInput_series.xlsx": "Serise/TempleteInput_series.xlsx",
-    "TemplateMasterSeriesHistory.xlsx": "Serise/TempleteMasterSeriesHistory.xlsx",
-    "TemplateSampleSeriesRules.xlsx": "Serise/TempleteSampleSeriesRules.xlsx"
-}
+process_choice = st.radio("Choose Process", ["Upload & Process", "Update/Delete GitHub Files"])
 
-for name, path in templates.items():
-    btn = st.download_button(
-        label=f"Download {name}",
-        data=load_from_github(path).read(),
-        file_name=name
-    )
+if process_choice == "Upload & Process":
+    uploaded_file = st.file_uploader("Upload Input_series.xlsx", type=["xlsx"])
+    if uploaded_file:
+        # Load master & rules from GitHub
+        token = st.text_input("GitHub Token (for private repos)", type="password")
+        if token:
+            master_df = load_excel_from_github(REPO_NAME, MASTER_PATH, token)
+            rules_df = load_excel_from_github(REPO_NAME, RULES_PATH, token)
 
-# 2️⃣ Select operation
-st.subheader("⚙️ Operation Mode")
-operation = st.radio("Choose an operation:", ["Append", "Delete"])
+            output_df = compare_requested_series(uploaded_file, BytesIO(master_df.to_excel(index=False)), BytesIO(rules_df.to_excel(index=False)))
 
-# 3️⃣ File upload
-uploaded_input = st.file_uploader("Upload Input_series.xlsx", type=["xlsx"])
+            # Download processed file
+            towrite = BytesIO()
+            output_df.to_excel(towrite, index=False)
+            towrite.seek(0)
+            st.download_button("📥 Download Processed Excel", data=towrite, file_name="Processed_Output.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# 4️⃣ Process button
-if uploaded_input:
-    # Load GitHub master and rules
-    master_file = load_from_github("Serise/MasterSeriesHistory.xlsx")
-    rules_file = load_from_github("Serise/SampleSeriesRules.xlsx")
+elif process_choice == "Update/Delete GitHub Files":
+    action = st.radio("Action", ["append", "delete"])
+    uploaded_changes = st.file_uploader("Upload file with changes (xlsx)", type=["xlsx"])
+    token = st.text_input("GitHub Token", type="password")
 
-    st.write("Processing...")
-    output_df = compare_requested_series(master_file, uploaded_input, rules_file, top_n=1)
+    if uploaded_changes and token:
+        changes_df = pd.read_excel(uploaded_changes)
 
-    st.dataframe(output_df)
+        # Load files from GitHub
+        master_df = load_excel_from_github(REPO_NAME, MASTER_PATH, token)
+        rules_df = load_excel_from_github(REPO_NAME, RULES_PATH, token)
 
-    # Save locally
-    towrite = BytesIO()
-    output_df.to_excel(towrite, index=False)
-    towrite.seek(0)
+        # Modify files
+        master_df = modify_master_or_rules(master_df, changes_df, action)
+        rules_df = modify_master_or_rules(rules_df, changes_df, action)
 
-    st.download_button(
-        label="💾 Download Output",
-        data=towrite,
-        file_name="Output_Series.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        # Save back to GitHub
+        save_excel_to_github(REPO_NAME, MASTER_PATH, master_df, f"{action} MasterSeriesHistory", token)
+        save_excel_to_github(REPO_NAME, RULES_PATH, rules_df, f"{action} SeriesRules", token)
 
-    # 5️⃣ Option to update GitHub
-    if st.checkbox("Update MasterSeriesHistory.xlsx and SeriesRules.xlsx in GitHub"):
-        upload_to_github("Serise/MasterSeriesHistory.xlsx", towrite.getvalue(), f"{operation} operation update")
-        st.success("GitHub files updated successfully!")
+        st.success(f"✅ Successfully {action}ed data in GitHub files")
