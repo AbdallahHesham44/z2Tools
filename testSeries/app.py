@@ -19,7 +19,6 @@ REPO_NAME = "Series_2"
 BRANCH = "main"
 MASTER_FILE_PATH = "SampleMasterSeriesHistory.xlsx"
 RULES_FILE_PATH = "SampleSeriesRules.xlsx"
-
 def update_github_file(dataframe, file_path, commit_message, github_token):
     """
     Update a file in GitHub repository with new dataframe content.
@@ -56,7 +55,7 @@ def update_github_file(dataframe, file_path, commit_message, github_token):
         if get_response.status_code == 200:
             current_sha = get_response.json()['sha']
         else:
-            return False, f"Failed to get current file SHA: {get_response.status_code}"
+            return False, f"Failed to get current file SHA: {get_response.status_code} - {get_response.text}"
         
         # Prepare update payload
         update_data = {
