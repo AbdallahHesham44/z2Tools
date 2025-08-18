@@ -9,72 +9,91 @@ import base64
 from datetime import datetime
 
 # Configuration
-MASTER_URL = "https://raw.githubusercontent.com/AbdallahHesham44/Series_2/refs/heads/main/SampleMasterSeriesHistory.xlsx"
-RULES_URL = "https://raw.githubusercontent.com/AbdallahHesham44/Series_2/refs/heads/main/SampleSeriesRules.xlsx"
+MASTER_URL = "https://raw.githubusercontent.com/AbdallahHesham44/Series_2/refs/heads/main/MasterSeriesHistory.xlsx"
+RULES_URL  = "https://raw.githubusercontent.com/AbdallahHesham44/Series_2/refs/heads/main/SampleSeriesRules.xlsx"
 
-# GitHub API Configuration
-GITHUB_API_BASE = "https://api.github.com"
-REPO_OWNER = "AbdallahHesham44"
-REPO_NAME = "Series_2"
-BRANCH = "main"
-MASTER_FILE_PATH = "SampleMasterSeriesHistory.xlsx"
-RULES_FILE_PATH = "SampleSeriesRules.xlsx"
-def update_github_file(dataframe, file_path, commit_message, github_token):
+# GitHub API Configuration (defaults; can be overridden by st.secrets)
+GITHUB_API_BASE   = "https://api.github.com"
+REPO_OWNER        = "AbdallahHesham44"
+REPO_NAME         = "Series_2"
+BRANCH            = "main"
+MASTER_FILE_PATH  = "MasterSeriesHistory.xlsx"
+RULES_FILE_PATH   = "SampleSeriesRules.xlsx"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# NEW: helpers for pushing to GitHub (replace old update_github_file)
+# ──────────────────────────────────────────────────────────────────────────────
+def df_to_xlsx_bytes(df: pd.DataFrame) -> bytes:
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine='openpyxl')
+    return buf.getvalue()
+
+def update_github_bytes(file_bytes: bytes, file_path: str, commit_message: str, github_token: str):
     """
-    Update a file in GitHub repository with new dataframe content.
-    
-    Args:
-        dataframe: pandas DataFrame to upload
-        file_path: path to file in repository (e.g., "SampleMasterSeriesHistory.xlsx")
-        commit_message: commit message for the update
-        github_token: GitHub personal access token
-    
-    Returns:
-        tuple: (success: bool, message: str)
+    Create or update a file in GitHub using the Contents API.
+    Works with classic and fine-grained PATs (needs contents:write).
     """
     try:
-        # Convert dataframe to Excel bytes
-        output = io.BytesIO()
-        dataframe.to_excel(output, index=False, engine='openpyxl')
-        file_content = output.getvalue()
-        
-        # Encode content to base64
-        content_base64 = base64.b64encode(file_content).decode('utf-8')
-        
-        # GitHub API headers
+        content_b64 = base64.b64encode(file_bytes).decode("utf-8")
         headers = {
-            'Authorization': f'token {github_token}',
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
+            "Authorization": f"Bearer {github_token}",  # modern scheme
+            "Accept": "application/vnd.github.v3+json",
+            "Content-Type": "application/json",
         }
-        
-        # Get current file SHA (required for updates)
-        get_url = f"{GITHUB_API_BASE}/repos/{REPO_OWNER}/{REPO_NAME}/contents/{file_path}"
-        get_response = requests.get(get_url, headers=headers)
-        
-        if get_response.status_code == 200:
-            current_sha = get_response.json()['sha']
-        else:
-            return False, f"Failed to get current file SHA: {get_response.status_code} - {get_response.text}"
-        
-        # Prepare update payload
-        update_data = {
-            'message': commit_message,
-            'content': content_base64,
-            'sha': current_sha,
-            'branch': BRANCH
+        url = f"{GITHUB_API_BASE}/repos/{REPO_OWNER}/{REPO_NAME}/contents/{file_path}"
+
+        # Get current SHA if file exists
+        sha = None
+        get_r = requests.get(url, headers=headers)
+        if get_r.status_code == 200:
+            sha = get_r.json().get("sha")
+        elif get_r.status_code not in (200, 404):
+            return False, f"Failed to read file: {get_r.status_code} – {get_r.text}"
+
+        payload = {
+            "message": commit_message,
+            "content": content_b64,
+            "branch": BRANCH,
+            "committer": {"name": "Series Tool", "email": "no-reply@example.com"},
         }
-        
-        # Update file via GitHub API
-        put_response = requests.put(get_url, json=update_data, headers=headers)
-        
-        if put_response.status_code == 200:
-            return True, "File updated successfully on GitHub!"
+        if sha:
+            payload["sha"] = sha
+
+        put_r = requests.put(url, headers=headers, json=payload)
+        if put_r.status_code in (200, 201):
+            return True, "File pushed to GitHub successfully."
         else:
-            return False, f"Failed to update file: {put_response.status_code} - {put_response.text}"
-            
+            try:
+                j = put_r.json()
+            except Exception:
+                j = put_r.text
+            return False, f"GitHub push failed: {put_r.status_code} – {j}"
     except Exception as e:
-        return False, f"Error updating GitHub file: {str(e)}"
+        return False, f"Error pushing to GitHub: {e}"
+
+# Helper to read token from Streamlit secrets (no UI)
+def _get_github_token_from_secrets():
+    token = None
+    try:
+        token = st.secrets.get("GITHUB_TOKEN", None)
+        if token is None and "github" in st.secrets:
+            token = st.secrets["github"].get("token", None)
+    except Exception:
+        token = None
+    return token
+
+# ── NEW: override owner/repo and BOTH file paths from secrets (if provided) ──
+def _apply_repo_config_from_secrets():
+    global REPO_OWNER, REPO_NAME, MASTER_FILE_PATH, RULES_FILE_PATH
+    try:
+        gh = st.secrets.get("github", {})
+        REPO_OWNER       = gh.get("owner", REPO_OWNER)
+        REPO_NAME        = gh.get("repo", REPO_NAME)
+        MASTER_FILE_PATH = gh.get("file_master_path", MASTER_FILE_PATH)
+        RULES_FILE_PATH  = gh.get("file_rules_path", RULES_FILE_PATH)
+    except Exception:
+        pass
+# ──────────────────────────────────────────────────────────────────────────────
 
 def load_file_from_github(url):
     """Load Excel file from GitHub URL."""
@@ -279,6 +298,7 @@ def compare_series_logic(master_df, comparison_df, rules_df=None, top_n=1):
     if not all(col in comparison_df.columns for col in required_cols_2):
         st.error(f"Comparison file missing columns: {set(required_cols_2) - set(comparison_df.columns)}")
         return None
+
 
     # Create matching keys
     df1_with_majorid['key'] = df1_with_majorid[['ManufacturerName', 'Category', 'Family']].astype(str).agg('|'.join, axis=1)
@@ -601,24 +621,16 @@ def main():
     st.title("🔍 Enhanced Series Comparison Tool")
     st.markdown("Compare series data with CRUD operations support")
     
-    # GitHub Token Input
-    st.sidebar.header("🔑 GitHub Configuration")
-    github_token = st.sidebar.text_input(
-        "GitHub Personal Access Token",
-        type="password",
-        help="Required for updating files on GitHub. Get one from GitHub Settings > Developer settings > Personal access tokens"
-    )
-    github_token="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"
+    # Apply repo/paths from secrets (lets you change owner/repo/paths without code edits)
+    _apply_repo_config_from_secrets()
 
-    if github_token:
-        st.sidebar.success("✅ Token provided")
-    else:
-        st.sidebar.warning("⚠️ Token required for GitHub updates")
+    # Token from secrets
+    github_token = _get_github_token_from_secrets()
 
     # Load master files from GitHub
     with st.spinner("Loading master files from GitHub..."):
         master_df = load_file_from_github(MASTER_URL)
-        rules_df = load_file_from_github(RULES_URL)
+        rules_df  = load_file_from_github(RULES_URL)
 
     if master_df is None or rules_df is None:
         st.error("Failed to load master files from GitHub")
@@ -671,7 +683,7 @@ def main():
                             st.info(f"📊 Appended new rows: {appended_count}")
                             st.info(f"📊 Total rows: {len(updated_master)}")
                             
-                            # Create download buttons and GitHub update
+                            # Create download buttons and stage GitHub payload
                             col1, col2 = st.columns(2)
                             
                             with col1:
@@ -686,22 +698,13 @@ def main():
                                 )
                             
                             with col2:
-                                # GitHub update button
-                                if github_token and st.button("🚀 Update GitHub Repository", key="update_master_github"):
-                                    with st.spinner("Updating GitHub repository..."):
-                                        success, message = update_github_file(
-                                            updated_master, 
-                                            MASTER_FILE_PATH,
-                                            f"Update MasterSeriesHistory - {updated_count} updated, {appended_count} new rows",
-                                            github_token
-                                        )
-                                        
-                                        if success:
-                                            st.success(f"🎉 {message}")
-                                        else:
-                                            st.error(f"❌ {message}")
-                                elif not github_token:
-                                    st.warning("GitHub token required for repository updates")
+                                # Stage payload for global push section
+                                st.session_state["gh_payload"] = {
+                                    "bytes": df_to_xlsx_bytes(updated_master),
+                                    "path": MASTER_FILE_PATH,  # ← from secrets if set
+                                    "message": f"Update MasterSeriesHistory - {updated_count} updated, {appended_count} new rows",
+                                }
+                                st.success("✅ Push payload prepared (see '🚀 Push to GitHub' section below).")
 
                     elif operation.startswith("2"):
                         # Delete from Master Series History
@@ -717,7 +720,7 @@ def main():
                                 st.info(f"🗑️ Deleted rows: {deleted_count}")
                                 st.info(f"📊 Remaining rows: {len(updated_master)}")
                                 
-                                # Create download buttons and GitHub update
+                                # Create download buttons and stage GitHub payload
                                 col1, col2 = st.columns(2)
                                 
                                 with col1:
@@ -732,22 +735,13 @@ def main():
                                     )
                                 
                                 with col2:
-                                    # GitHub update button
-                                    if github_token and st.button("🚀 Update GitHub Repository", key="delete_master_github"):
-                                        with st.spinner("Updating GitHub repository..."):
-                                            success, message = update_github_file(
-                                                updated_master, 
-                                                MASTER_FILE_PATH,
-                                                f"Delete from MasterSeriesHistory - {deleted_count} rows deleted",
-                                                github_token
-                                            )
-                                            
-                                            if success:
-                                                st.success(f"🎉 {message}")
-                                            else:
-                                                st.error(f"❌ {message}")
-                                    elif not github_token:
-                                        st.warning("GitHub token required for repository updates")
+                                    # Stage payload for global push section
+                                    st.session_state["gh_payload"] = {
+                                        "bytes": df_to_xlsx_bytes(updated_master),
+                                        "path": MASTER_FILE_PATH,  # ← from secrets if set
+                                        "message": f"Delete from MasterSeriesHistory - {deleted_count} rows deleted",
+                                    }
+                                    st.success("✅ Push payload prepared (see '🚀 Push to GitHub' section below).")
                         else:
                             st.warning("Please confirm deletion to proceed")
 
@@ -762,7 +756,7 @@ def main():
                             st.info(f"📊 Appended new rules: {appended_count}")
                             st.info(f"📊 Total rules: {len(updated_rules)}")
                             
-                            # Create download buttons and GitHub update
+                            # Create download buttons and stage GitHub payload
                             col1, col2 = st.columns(2)
                             
                             with col1:
@@ -777,22 +771,13 @@ def main():
                                 )
                             
                             with col2:
-                                # GitHub update button
-                                if github_token and st.button("🚀 Update GitHub Repository", key="update_rules_github"):
-                                    with st.spinner("Updating GitHub repository..."):
-                                        success, message = update_github_file(
-                                            updated_rules, 
-                                            RULES_FILE_PATH,
-                                            f"Update SeriesRules - {updated_count} updated, {appended_count} new rules",
-                                            github_token
-                                        )
-                                        
-                                        if success:
-                                            st.success(f"🎉 {message}")
-                                        else:
-                                            st.error(f"❌ {message}")
-                                elif not github_token:
-                                    st.warning("GitHub token required for repository updates")
+                                # Stage payload for global push section
+                                st.session_state["gh_payload"] = {
+                                    "bytes": df_to_xlsx_bytes(updated_rules),
+                                    "path": RULES_FILE_PATH,  # ← from secrets if set
+                                    "message": f"Update SeriesRules - {updated_count} updated, {appended_count} new rules",
+                                }
+                                st.success("✅ Push payload prepared (see '🚀 Push to GitHub' section below).")
 
                     elif operation.startswith("4"):
                         # Delete from Series Rules
@@ -808,7 +793,7 @@ def main():
                                 st.info(f"🗑️ Deleted rules: {deleted_count}")
                                 st.info(f"📊 Remaining rules: {len(updated_rules)}")
                                 
-                                # Create download buttons and GitHub update
+                                # Create download buttons and stage GitHub payload
                                 col1, col2 = st.columns(2)
                                 
                                 with col1:
@@ -823,22 +808,13 @@ def main():
                                     )
                                 
                                 with col2:
-                                    # GitHub update button
-                                    if github_token and st.button("🚀 Update GitHub Repository", key="delete_rules_github"):
-                                        with st.spinner("Updating GitHub repository..."):
-                                            success, message = update_github_file(
-                                                updated_rules, 
-                                                RULES_FILE_PATH,
-                                                f"Delete from SeriesRules - {deleted_count} rules deleted",
-                                                github_token
-                                            )
-                                            
-                                            if success:
-                                                st.success(f"🎉 {message}")
-                                            else:
-                                                st.error(f"❌ {message}")
-                                    elif not github_token:
-                                        st.warning("GitHub token required for repository updates")
+                                    # Stage payload for global push section
+                                    st.session_state["gh_payload"] = {
+                                        "bytes": df_to_xlsx_bytes(updated_rules),
+                                        "path": RULES_FILE_PATH,  # ← from secrets if set
+                                        "message": f"Delete from SeriesRules - {deleted_count} rules deleted",
+                                    }
+                                    st.success("✅ Push payload prepared (see '🚀 Push to GitHub' section below).")
                         else:
                             st.warning("Please confirm deletion to proceed")
 
@@ -900,6 +876,32 @@ def main():
         except Exception as e:
             st.error(f"Error processing file: {e}")
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Single global Push-to-GitHub section (outside Execute button)
+    # ──────────────────────────────────────────────────────────────────────
+    st.header("🚀 Push to GitHub")
+    if "gh_payload" not in st.session_state:
+        st.info("Nothing queued to push yet. Execute an operation first.")
+    else:
+        payload = st.session_state["gh_payload"]
+        st.write(f"**Path:** `{payload['path']}`")
+        st.write(f"**Message:** {payload['message']}")
+        if github_token:
+            if st.button("Push now"):
+                with st.spinner("Pushing to GitHub..."):
+                    ok, msg = update_github_bytes(
+                        file_bytes=payload["bytes"],
+                        file_path=payload["path"],
+                        commit_message=payload["message"],
+                        github_token=github_token
+                    )
+                if ok:
+                    st.success(msg)
+                    # Optional: clear queued payload after successful push
+                    # st.session_state.pop("gh_payload", None)
+                else:
+                    st.error(msg)
+
     # Information section
     st.header("ℹ️ Required File Formats")
     
@@ -958,14 +960,10 @@ def main():
 
     with st.expander("🔧 GitHub Integration Setup"):
         st.markdown("""
-        **To enable GitHub updates, you need a Personal Access Token:**
+        **Add to your app secrets** (Settings → Secrets):
         
-        1. Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
-        2. Click "Generate new token (classic)"
-        3. Select scopes: `repo` (Full control of private repositories)
-        4. Copy the token and paste it in the sidebar
-        
-        **Security Note:** Your token is only used during this session and is not stored.
+
+        The app will use these values automatically for pushes.
         """)
 
     # Footer
