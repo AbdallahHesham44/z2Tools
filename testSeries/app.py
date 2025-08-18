@@ -8,7 +8,7 @@ import io
 from datetime import datetime
 
 # Configuration
-MASTER_URL = "https://raw.githubusercontent.com/AbdallahHesham44/Series_2/refs/heads/main/SampleMasterSeriesHistory.xlsx"
+MASTER_URL = "https://raw.githubusercontent.com/AbdallahHesham44/Series_2/refs/heads/main/MasterSeriesHistory.xlsx"
 RULES_URL = "https://raw.githubusercontent.com/AbdallahHesham44/Series_2/refs/heads/main/SampleSeriesRules.xlsx"
 
 def load_file_from_github(url):
