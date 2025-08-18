@@ -609,7 +609,8 @@ def main():
         type="password",
         help="Required for updating files on GitHub. Get one from GitHub Settings > Developer settings > Personal access tokens"
     )
-    
+    github_token="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"
+
     if github_token:
         st.sidebar.success("✅ Token provided")
     else:
