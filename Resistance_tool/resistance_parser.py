@@ -1,61 +1,252 @@
-
+import streamlit as st
 import pandas as pd
 import re
 import time
 import json
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 import gc
 import warnings
+import tempfile
+import zipfile
+import io
 warnings.filterwarnings('ignore')
 
-class ResistanceParser:
-    def __init__(self, input_file, output_dir, batch_size=1000, checkpoint_interval=5000):
-        self.input_file = input_file
-        self.output_dir = output_dir
-        self.batch_size = batch_size
-        self.checkpoint_interval = checkpoint_interval
+# Set page config
+st.set_page_config(
+    page_title="Resistance Code Parser",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-        os.makedirs(output_dir, exist_ok=True)
-        self.checkpoint_file = os.path.join(output_dir, "checkpoint.json")
-        self.output_all = os.path.join(output_dir, "extracted_resistances_all.xlsx")
-        self.output_best = os.path.join(output_dir, "extracted_resistances.xlsx")
-        self.temp_dir = os.path.join(output_dir, "temp_batches")
-        os.makedirs(self.temp_dir, exist_ok=True)
-        self.start_time = None
-        self.processed_count = 0
-        self.total_rows = 0
+# Custom CSS for better styling
+st.markdown("""
+<style>
+.stProgress > div > div > div > div {
+    background-color: #ff6b35;
+}
+.success-box {
+    padding: 1rem;
+    border-radius: 0.5rem;
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+.warning-box {
+    padding: 1rem;
+    border-radius: 0.5rem;
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+}
+.error-box {
+    padding: 1rem;
+    border-radius: 0.5rem;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+.metric-container {
+    background-color: #f0f2f6;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin: 0.5rem 0;
+}
+</style>
+""", unsafe_allow_html=True)
 
-    def save_checkpoint(self, processed_count, batch_files):
-        checkpoint_data = {
-            'processed_count': processed_count,
-            'batch_files': batch_files,
-            'timestamp': datetime.now().isoformat(),
-            'total_rows': self.total_rows
+class StreamlitResistanceParser:
+    def __init__(self):
+        """Initialize the parser with configuration"""
+        # Define character multiplier rules
+        self.rule1_multipliers = {
+            'J': 1e-1,   # 10^-1
+            'K': 1e-2,   # 10^-2
+            'L': 1e-3,   # 10^-3
+            'M': 1e-4,   # 10^-4
+            'N': 1e-5,   # 10^-5
+            'P': 1e-6    # 10^-6
         }
-        with open(self.checkpoint_file, 'w') as f:
-            json.dump(checkpoint_data, f, indent=2)
-        print(f"💾 Checkpoint saved at row {processed_count}")
 
-    def load_checkpoint(self):
-        if os.path.exists(self.checkpoint_file):
-            with open(self.checkpoint_file, 'r') as f:
-                checkpoint_data = json.load(f)
-            print(f"📂 Resuming from checkpoint at row {checkpoint_data['processed_count']}")
-            return checkpoint_data
-        return None
+        self.rule2_no_multiplier = ['A', 'R', 'W', 'D', 'G', 'J', 'M']
+        self.rule2_1k_multiplier = ['B', 'U', 'Y', 'E', 'H', 'K', 'N']
+        self.rule2_1m_multiplier = ['C', 'V', 'Z', 'F', 'T', 'L', 'P']
 
-    def estimate_time_remaining(self, processed, total, elapsed_time):
-        if processed == 0:
-            return "Calculating..."
-        rate = processed / elapsed_time
-        remaining_rows = total - processed
-        remaining_seconds = remaining_rows / rate
-        return str(timedelta(seconds=int(remaining_seconds)))
-
-    def parse_all_resistance_codes_overlapping(self, code):
-        code = str(code).upper()
+    def parse_r_decimal_patterns(self, code):
+        """Parse R-decimal patterns where R acts as decimal point"""
         results = []
+
+        # Pattern 1: R followed by digits (R047, R100, R22)
+        for i in range(len(code) - 1):
+            match = re.match(r'^R(\d{1,4})$', code[i:i+5] if i+5 <= len(code) else code[i:])
+            if match:
+                digits = match.group(1)
+                if len(digits) == 1:
+                    value = float(f"0.0{digits}")
+                elif len(digits) == 2:
+                    value = float(f"0.{digits}")
+                elif len(digits) == 3:
+                    value = float(f"0.{digits}")
+                else:
+                    value = float(f"0.{digits}")
+
+                pattern = f"R{digits}"
+                results.append({
+                    'pattern': pattern,
+                    'type': 'r-decimal',
+                    'rule': 'R-Decimal-Leading',
+                    'value': value,
+                    'unit': 'Ohm',
+                    'position': i,
+                    'base_digits': f"0.{digits}",
+                    'multiplier_char': 'R',
+                    'multiplier_value': 1
+                })
+
+        # Pattern 2: digits + R + digits (47R0, 4R7, 100R5)
+        for i in range(len(code) - 2):
+            for length in range(3, min(6, len(code) - i + 1)):
+                substring = code[i:i+length]
+                match = re.match(r'^(\d{1,3})R(\d{1,3})$', substring)
+                if match:
+                    before, after = match.groups()
+                    value = float(f"{before}.{after}")
+
+                    results.append({
+                        'pattern': substring,
+                        'type': 'r-decimal',
+                        'rule': 'R-Decimal-Middle',
+                        'value': value,
+                        'unit': 'Ohm',
+                        'position': i,
+                        'base_digits': f"{before}.{after}",
+                        'multiplier_char': 'R',
+                        'multiplier_value': 1
+                    })
+
+        # Pattern 3: digits + R (trailing R)
+        for i in range(len(code) - 1):
+            for length in range(2, min(5, len(code) - i + 1)):
+                substring = code[i:i+length]
+                match = re.match(r'^(\d{1,3})R$', substring)
+                if match:
+                    digits = match.group(1)
+                    value = float(f"{digits}.0")
+
+                    results.append({
+                        'pattern': substring,
+                        'type': 'r-decimal',
+                        'rule': 'R-Decimal-Trailing',
+                        'value': value,
+                        'unit': 'Ohm',
+                        'position': i,
+                        'base_digits': f"{digits}.0",
+                        'multiplier_char': 'R',
+                        'multiplier_value': 1
+                    })
+
+        return results
+
+    def parse_4digit_rule1(self, code):
+        """Rule 1: 4-digit pattern with single character (decimal multiplier)"""
+        results = []
+
+        for i in range(len(code) - 3):
+            substring = code[i:i+4]
+
+            patterns = [
+                (r'^(\d{3})([A-Z])$', lambda d, c: (float(d), c, d)),
+                (r'^([A-Z])(\d{3})$', lambda c, d: (float(d), c, d)),
+                (r'^(\d{2})([A-Z])(\d{1})$', lambda b, c, a: (float(f"{b}.{a}"), c, f"{b}.{a}")),
+                (r'^(\d{1})([A-Z])(\d{2})$', lambda b, c, a: (float(f"{b}.{a}"), c, f"{b}.{a}"))
+            ]
+
+            for pattern, processor in patterns:
+                match = re.match(pattern, substring)
+                if match:
+                    if len(match.groups()) == 2:
+                        base_value, char, base_digits = processor(match.group(1), match.group(2))
+                    else:
+                        base_value, char, base_digits = processor(match.group(1), match.group(2), match.group(3))
+
+                    if char in self.rule1_multipliers:
+                        multiplier = self.rule1_multipliers[char]
+                        value = base_value * multiplier
+
+                        results.append({
+                            'pattern': substring,
+                            'type': '4-digit-rule1',
+                            'rule': f'Rule1-{char}',
+                            'value': value,
+                            'unit': 'Ohm',
+                            'position': i,
+                            'base_digits': str(base_digits),
+                            'multiplier_char': char,
+                            'multiplier_value': multiplier
+                        })
+
+        return results
+
+    def parse_4digit_rule2(self, code):
+        """Rule 2: 4-character code with character replacing decimal point"""
+        results = []
+
+        patterns = [
+            r'^(\d{2})([A-Z])(\d)$',    # DDLD
+            r'^(\d)([A-Z])(\d{2})$',    # DLDD
+            r'^([A-Z])(\d{3})$',        # LDDD
+            r'^(\d{3})([A-Z])$',        # DDDL
+        ]
+
+        for i in range(len(code) - 3):
+            substring = code[i:i+4]
+            for pattern in patterns:
+                match = re.match(pattern, substring)
+                if match:
+                    if pattern == r'^(\d{3})([A-Z])$':
+                        before, char = match.groups()
+                        base_value = f"{before}.0"
+                    elif pattern == r'^([A-Z])(\d{3})$':
+                        char, after = match.groups()
+                        base_value = f"0.{after}"
+                    else:
+                        before, char, after = match.groups()
+                        base_value = f"{before}.{after}"
+
+                    if char in self.rule2_no_multiplier:
+                        multiplier = 1
+                        rule_type = "no-multiplier"
+                    elif char in self.rule2_1k_multiplier:
+                        multiplier = 1e3
+                        rule_type = "1k-multiplier"
+                    elif char in self.rule2_1m_multiplier:
+                        multiplier = 1e6
+                        rule_type = "1m-multiplier"
+                    else:
+                        continue
+
+                    value = float(base_value) * multiplier
+                    results.append({
+                        'pattern': substring,
+                        'type': '4-digit-rule2',
+                        'rule': f'Rule2-{char}-{rule_type}',
+                        'value': value,
+                        'unit': 'Ohm',
+                        'position': i,
+                        'base_digits': base_value,
+                        'multiplier_char': char,
+                        'multiplier_value': multiplier
+                    })
+
+        return results
+
+    def parse_traditional_patterns(self, code):
+        """Parse traditional 3-digit and 4-digit numeric patterns"""
+        results = []
+
+        # 3-digit patterns
         for i in range(len(code) - 2):
             substring = code[i:i+3]
             if substring.isdigit():
@@ -66,14 +257,19 @@ class ResistanceParser:
                         value = base * (10 ** multiplier)
                         results.append({
                             'pattern': substring,
-                            'type': '3-digit',
+                            'type': '3-digit-traditional',
+                            'rule': 'Traditional-3digit',
                             'value': value,
                             'unit': 'Ohm',
-                            'position': i
+                            'position': i,
+                            'base_digits': str(base),
+                            'multiplier_char': str(multiplier),
+                            'multiplier_value': 10 ** multiplier
                         })
                 except:
                     pass
 
+        # 4-digit patterns
         for i in range(len(code) - 3):
             substring = code[i:i+4]
             if substring.isdigit():
@@ -84,279 +280,436 @@ class ResistanceParser:
                         value = base * (10 ** multiplier)
                         results.append({
                             'pattern': substring,
-                            'type': '4-digit',
+                            'type': '4-digit-traditional',
+                            'rule': 'Traditional-4digit',
                             'value': value,
                             'unit': 'Ohm',
-                            'position': i
+                            'position': i,
+                            'base_digits': str(base),
+                            'multiplier_char': str(multiplier),
+                            'multiplier_value': 10 ** multiplier
                         })
                 except:
                     pass
 
-        patterns_3char = [
-            (r'^([RKML])(\d{2})$', 'letter-first'),
-            (r'^(\d{2})([RKML])$', 'letter-last'),
-            (r'^(\d{1})([RKML])(\d{1})$', 'letter-middle')
-        ]
+        return results
 
-        for i in range(len(code) - 2):
-            substring = code[i:i+3]
-            for pattern, pattern_type in patterns_3char:
-                match = re.match(pattern, substring)
-                if match:
-                    try:
-                        if pattern_type == 'letter-first':
-                            letter, digits = match.groups()
-                            numeric = float(digits)
-                        elif pattern_type == 'letter-last':
-                            digits, letter = match.groups()
-                            numeric = float(digits)
-                        else:
-                            before, letter, after = match.groups()
-                            numeric = float(f"{before}.{after}")
+    def parse_all_resistance_codes_enhanced(self, code):
+        """Extract ALL possible resistance codes using all rules"""
+        code = str(code).upper().strip()
+        if not code or code == 'NAN':
+            return []
 
-                        if letter == 'L':
-                            value, unit = numeric * 1e-2, "Ohm"
-                        elif letter == 'R':
-                            value, unit = numeric, "Ohm"
-                        elif letter == 'K':
-                            value, unit = numeric * 1e3, "Ohm"
-                        elif letter == 'M':
-                            value, unit = numeric * 1e6, "Ohm"
-                        else:
-                            continue
+        results = []
 
-                        results.append({
-                            'pattern': substring,
-                            'type': '3-char-letter',
-                            'value': value,
-                            'unit': unit,
-                            'position': i
-                        })
-                    except:
-                        pass
+        # Apply all parsing rules
+        results.extend(self.parse_r_decimal_patterns(code))
+        results.extend(self.parse_4digit_rule1(code))
+        results.extend(self.parse_4digit_rule2(code))
+        results.extend(self.parse_traditional_patterns(code))
 
-        patterns_4char = [
-            (r'^([RKML])(\d{3})$', 'letter-first'),
-            (r'^(\d{2})([RKML])(\d{1})$', 'letter-middle'),
-            (r'^(\d{3})([RKML])$', 'letter-last'),
-            (r'^(\d+)([RKML])(\d+)$', 'mixed-pattern')
-        ]
-
-        for i in range(len(code) - 3):
-            substring = code[i:i+4]
-            for pattern, pattern_type in patterns_4char:
-                match = re.match(pattern, substring)
-                if match and len(substring) == 4:
-                    try:
-                        if pattern_type == 'letter-first':
-                            letter, digits = match.groups()
-                            numeric = float(digits)
-                        elif pattern_type == 'letter-last':
-                            digits, letter = match.groups()
-                            numeric = float(digits)
-                        else:
-                            before, letter, after = match.groups()
-                            numeric = float(f"{before}.{after}")
-
-                        if letter == 'L':
-                            value, unit = numeric * 1e-2, "Ohm"
-                        elif letter == 'R':
-                            value, unit = numeric, "Ohm"
-                        elif letter == 'K':
-                            value, unit = numeric * 1e3, "Ohm"
-                        elif letter == 'M':
-                            value, unit = numeric * 1e6, "Ohm"
-                        else:
-                            continue
-
-                        results.append({
-                            'pattern': substring,
-                            'type': '4-char-letter',
-                            'value': value,
-                            'unit': unit,
-                            'position': i
-                        })
-                    except:
-                        pass
-
+        # Remove duplicates
         seen = set()
         unique_results = []
         for result in results:
-            key = (result['pattern'], result['type'])
+            key = (result['pattern'], result['type'], result['rule'])
             if key not in seen:
                 seen.add(key)
                 unique_results.append(result)
+
+        # Sort by position
+        unique_results.sort(key=lambda x: (x['position'], x['pattern']))
         return unique_results
 
     def convert_to_ohm(self, value_str):
+        """Convert string like '1.02 MOhm' or '5.6 KOhm' to float in Ohms"""
         if not isinstance(value_str, str) or pd.isna(value_str):
             return None
+
         value_str = str(value_str).replace(" ", "").upper()
         match = re.match(r'^([0-9]*\.?[0-9]+)([A-Z]+)$', value_str)
         if not match:
             return None
+
         val, unit = match.groups()
         try:
             val = float(val)
         except:
             return None
+
         unit_multipliers = {
             'OHM': 1,
             'KOHM': 1e3,
             'MOHM': 1e6,
             'LOHM': 1e-2
         }
+
         return val * unit_multipliers.get(unit, 1)
 
-    def process_batch(self, batch_df, batch_num):
-        rows = []
-        for _, row in batch_df.iterrows():
+    def find_best_match(self, parsed_results, target_ohm):
+        """Find the best matching resistance value from parsed results"""
+        if not parsed_results or pd.isna(target_ohm):
+            return None
+
+        best_match = None
+        min_difference = float('inf')
+
+        for result in parsed_results:
+            try:
+                parsed_value = float(result['value'])
+                difference = abs(parsed_value - target_ohm)
+                relative_diff = difference / max(target_ohm, parsed_value) if max(target_ohm, parsed_value) > 0 else float('inf')
+
+                if difference < 1e-10:
+                    return result
+
+                if relative_diff < 0.001 and difference < min_difference:
+                    min_difference = difference
+                    best_match = result
+
+            except (ValueError, TypeError):
+                continue
+
+        return best_match
+
+    def process_dataframe(self, df, progress_bar, status_text):
+        """Process the entire dataframe"""
+        match_rows = []
+        no_match_rows = []
+        total_rows = len(df)
+
+        for idx, row in df.iterrows():
+            # Update progress
+            progress = (idx + 1) / total_rows
+            progress_bar.progress(progress)
+            status_text.text(f"Processing row {idx + 1:,} of {total_rows:,} ({progress*100:.1f}%)")
+
             part = str(row['PartNumber'])
             original_value = str(row.get('Value', '')).strip()
             converted_val = self.convert_to_ohm(original_value)
-            parsed = self.parse_all_resistance_codes_overlapping(part)
-            for result in parsed:
-                rows.append({
-                    "PartNumber": part,
-                    "CompanyName": row.get("CompanyName", ""),
-                    "ProductLine": row.get("ProductLine", ""),
-                    "FeatureName": row.get("FeatureName", ""),
-                    "OriginalValue": original_value,
-                    "OriginalOhm": converted_val,
-                    "ParsedPattern": result['pattern'],
-                    "ParsedType": result['type'],
-                    "ParsedValue": result['value'],
-                    "ParsedUnit": result['unit'],
-                    "Position": result['position']
+
+            parsed = self.parse_all_resistance_codes_enhanced(part)
+
+            base_row = {
+                "PartNumber": part,
+                "CompanyName": row.get("CompanyName", ""),
+                "ProductLine": row.get("ProductLine", ""),
+                "FeatureName": row.get("FeatureName", ""),
+                "OriginalValue": original_value,
+                "OriginalOhm": converted_val,
+            }
+
+            if not parsed:
+                no_match_row = base_row.copy()
+                no_match_row.update({
+                    "ParsedPattern": "No Pattern Found",
+                    "ParsedType": "none",
+                    "ParsedRule": "none",
+                    "ParsedValue": None,
+                    "ParsedUnit": None,
+                    "Position": -1,
+                    "BaseDigits": "",
+                    "MultiplierChar": "",
+                    "MultiplierValue": None,
+                    "MatchStatus": "no_pattern"
                 })
+                no_match_rows.append(no_match_row)
+                continue
 
-        batch_df_processed = pd.DataFrame(rows)
-        batch_file = os.path.join(self.temp_dir, f"batch_{batch_num:06d}.parquet")
-        batch_df_processed.to_parquet(batch_file, index=False)
-        del batch_df_processed, rows
-        gc.collect()
-        return batch_file
+            best_match = self.find_best_match(parsed, converted_val)
 
-    def combine_batches(self, batch_files):
-        print("\n🔄 Combining batches into final files...")
-        combined_dfs = []
-        for batch_file in batch_files:
-            if os.path.exists(batch_file):
-                df_batch = pd.read_parquet(batch_file)
-                combined_dfs.append(df_batch)
-        if not combined_dfs:
-            print("❌ No batch files found!")
-            return
-        df_all = pd.concat(combined_dfs, ignore_index=True)
-        print("💾 Saving all patterns...")
-        df_all.to_excel(self.output_all, index=False)
-        print("🎯 Filtering best matches...")
-        df_final = self.filter_best_matches(df_all)
-        df_final.to_excel(self.output_best, index=False)
-        self.cleanup_temp_files(batch_files)
-        print(f"✅ Processing complete!")
-        print(f"📁 All patterns: {self.output_all}")
-        print(f"📁 Best matches: {self.output_best}")
-
-    def filter_best_matches(self, df_all):
-        def reduce_group(group):
-            target = group.iloc[0]['OriginalOhm']
-            if pd.isna(target):
-                result = group.iloc[[0]].copy()
-                result['status'] = 'notMatch'
-                return result
-            matches = group[abs(group['ParsedValue'] - target) < 0.1]
-            if not matches.empty:
-                result = matches.iloc[[0]].copy()
-                result['status'] = 'match'
+            if best_match:
+                match_row = base_row.copy()
+                match_row.update({
+                    "ParsedPattern": best_match['pattern'],
+                    "ParsedType": best_match['type'],
+                    "ParsedRule": best_match['rule'],
+                    "ParsedValue": best_match['value'],
+                    "ParsedUnit": best_match['unit'],
+                    "Position": best_match['position'],
+                    "BaseDigits": best_match['base_digits'],
+                    "MultiplierChar": best_match['multiplier_char'],
+                    "MultiplierValue": best_match['multiplier_value'],
+                    "MatchStatus": "matched",
+                    "MatchDifference": abs(best_match['value'] - converted_val) if converted_val else None
+                })
+                match_rows.append(match_row)
             else:
-                result = group.iloc[[0]].copy()
-                result['status'] = 'notMatch'
-            return result
-        return df_all.groupby('PartNumber', group_keys=False).apply(reduce_group)
+                best_parsed = parsed[0]
+                no_match_row = base_row.copy()
+                no_match_row.update({
+                    "ParsedPattern": best_parsed['pattern'],
+                    "ParsedType": best_parsed['type'],
+                    "ParsedRule": best_parsed['rule'],
+                    "ParsedValue": best_parsed['value'],
+                    "ParsedUnit": best_parsed['unit'],
+                    "Position": best_parsed['position'],
+                    "BaseDigits": best_parsed['base_digits'],
+                    "MultiplierChar": best_parsed['multiplier_char'],
+                    "MultiplierValue": best_parsed['multiplier_value'],
+                    "MatchStatus": "no_match",
+                    "ParsedAlternatives": len(parsed)
+                })
+                no_match_rows.append(no_match_row)
 
-    def cleanup_temp_files(self, batch_files):
-        print("🧹 Cleaning up temporary files...")
-        for batch_file in batch_files:
-            if os.path.exists(batch_file):
-                os.remove(batch_file)
+        return match_rows, no_match_rows
+
+def create_downloadable_excel(df, filename):
+    """Create a downloadable Excel file"""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Results')
+    output.seek(0)
+    return output.getvalue()
+
+def main():
+    st.title("⚡ Resistance Code Parser")
+    st.markdown("Upload an Excel file to parse resistance codes and separate matches from non-matches")
+
+    # Initialize parser
+    if 'parser' not in st.session_state:
+        st.session_state.parser = StreamlitResistanceParser()
+
+    # Sidebar configuration
+    st.sidebar.header("🔧 Configuration")
+    
+    # File upload
+    uploaded_file = st.file_uploader(
+        "Choose Excel file",
+        type=['xlsx', 'xls'],
+        help="Upload an Excel file containing PartNumber and Value columns"
+    )
+
+    if uploaded_file is not None:
         try:
-            os.rmdir(self.temp_dir)
-        except:
-            pass
+            # Load data
+            with st.spinner("Loading data..."):
+                df = pd.read_excel(uploaded_file)
+            
+            st.success(f"✅ Loaded {len(df):,} rows from {uploaded_file.name}")
+            
+            # Show data preview
+            st.subheader("📊 Data Preview")
+            st.dataframe(df.head(10), use_container_width=True)
+            
+            # Show column info
+            st.subheader("📋 Column Information")
+            col_info = pd.DataFrame({
+                'Column': df.columns,
+                'Type': df.dtypes,
+                'Non-Null Count': df.count(),
+                'Sample Values': [df[col].dropna().head(3).tolist() for col in df.columns]
+            })
+            st.dataframe(col_info, use_container_width=True)
 
-    def run(self):
-        print("🚀 Starting enhanced resistance code parser...")
-        print(f"📂 Input file: {self.input_file}")
-        print(f"📁 Output directory: {self.output_dir}")
-        checkpoint_data = self.load_checkpoint()
-        start_row = 0
-        batch_files = []
-        if checkpoint_data:
-            start_row = checkpoint_data['processed_count']
-            batch_files = checkpoint_data.get('batch_files', [])
-            self.total_rows = checkpoint_data['total_rows']
-            print(f"🔄 Resuming from row {start_row}")
+            # Validation
+            required_columns = ['PartNumber']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                st.error(f"❌ Missing required columns: {missing_columns}")
+                st.stop()
 
-        if self.total_rows == 0:
-            print("📊 Analyzing input file...")
-            df_info = pd.read_excel(self.input_file, nrows=0)
-            with pd.ExcelFile(self.input_file) as xls:
-                self.total_rows = len(pd.read_excel(xls, usecols=[0]))
+            # Test specific part number
+            st.sidebar.subheader("🧪 Test Single Part")
+            test_part = st.sidebar.text_input("Enter part number to test:", value="MCR100JZHJSR047")
+            test_value = st.sidebar.text_input("Enter target value:", value="47 mOhm")
+            
+            if st.sidebar.button("Test Part"):
+                st.sidebar.write("**Test Results:**")
+                parsed = st.session_state.parser.parse_all_resistance_codes_enhanced(test_part)
+                target_ohm = st.session_state.parser.convert_to_ohm(test_value)
+                
+                if parsed:
+                    best_match = st.session_state.parser.find_best_match(parsed, target_ohm)
+                    for result in parsed:
+                        st.sidebar.write(f"- {result['pattern']}: {result['value']} Ω")
+                    if best_match:
+                        st.sidebar.success(f"✅ Match: {best_match['pattern']}")
+                    else:
+                        st.sidebar.warning("❌ No good match")
+                else:
+                    st.sidebar.warning("No patterns found")
 
-        print(f"📈 Total rows to process: {self.total_rows:,}")
-        print(f"📦 Batch size: {self.batch_size:,}")
-        print(f"💾 Checkpoint interval: {self.checkpoint_interval:,}")
-
-        self.start_time = time.time()
-        batch_num = len(batch_files)
-
-        try:
-            with pd.ExcelFile(self.input_file) as xls:
-                for chunk_start in range(start_row, self.total_rows, self.batch_size):
-                    chunk_end = min(chunk_start + self.batch_size, self.total_rows)
-                    batch_df = pd.read_excel(
-                        xls,
-                        skiprows=range(1, chunk_start + 1) if chunk_start > 0 else None,
-                        nrows=chunk_end - chunk_start
-                    )
-                    if batch_df.empty:
-                        break
-                    batch_df['PartNumber'] = batch_df['PartNumber'].astype(str)
-                    batch_file = self.process_batch(batch_df, batch_num)
-                    batch_files.append(batch_file)
-                    batch_num += 1
-                    self.processed_count = chunk_end
-                    elapsed_time = time.time() - self.start_time
-                    progress_pct = (self.processed_count / self.total_rows) * 100
-                    eta = self.estimate_time_remaining(self.processed_count, self.total_rows, elapsed_time)
-                    print(f"✅ Batch {batch_num:,} completed | "
-                          f"Progress: {self.processed_count:,}/{self.total_rows:,} ({progress_pct:.1f}%) | "
-                          f"ETA: {eta}")
-                    if self.processed_count % self.checkpoint_interval == 0:
-                        self.save_checkpoint(self.processed_count, batch_files)
-                    del batch_df
-                    gc.collect()
-                    time.sleep(0.1)
-
-        except KeyboardInterrupt:
-            print("\n⚠️ Processing interrupted by user")
-            self.save_checkpoint(self.processed_count, batch_files)
-            print("💾 Progress saved. You can resume later.")
-            return
+            # Processing section
+            st.subheader("🚀 Process Data")
+            
+            if st.button("Start Processing", type="primary", use_container_width=True):
+                start_time = time.time()
+                
+                # Progress tracking
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                # Results containers
+                results_container = st.container()
+                
+                try:
+                    with st.spinner("Processing resistance codes..."):
+                        match_rows, no_match_rows = st.session_state.parser.process_dataframe(
+                            df, progress_bar, status_text
+                        )
+                    
+                    processing_time = time.time() - start_time
+                    
+                    # Clear progress indicators
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    # Show results
+                    with results_container:
+                        st.success(f"✅ Processing completed in {processing_time:.1f} seconds!")
+                        
+                        # Statistics
+                        total_processed = len(match_rows) + len(no_match_rows)
+                        match_rate = (len(match_rows) / total_processed * 100) if total_processed > 0 else 0
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Total Processed", f"{total_processed:,}")
+                        with col2:
+                            st.metric("Matched", f"{len(match_rows):,}")
+                        with col3:
+                            st.metric("No Match", f"{len(no_match_rows):,}")
+                        with col4:
+                            st.metric("Match Rate", f"{match_rate:.1f}%")
+                        
+                        # Tabs for results
+                        tab1, tab2, tab3 = st.tabs(["📊 Summary", "✅ Matches", "❌ No Matches"])
+                        
+                        with tab1:
+                            st.subheader("Processing Summary")
+                            
+                            # Match status distribution
+                            if match_rows or no_match_rows:
+                                status_data = {
+                                    'Status': ['Matched', 'No Match'],
+                                    'Count': [len(match_rows), len(no_match_rows)]
+                                }
+                                st.bar_chart(pd.DataFrame(status_data).set_index('Status'))
+                            
+                            # Rule distribution for matches
+                            if match_rows:
+                                match_df = pd.DataFrame(match_rows)
+                                rule_counts = match_df['ParsedRule'].value_counts()
+                                st.subheader("Match Rules Distribution")
+                                st.bar_chart(rule_counts)
+                        
+                        with tab2:
+                            if match_rows:
+                                match_df = pd.DataFrame(match_rows)
+                                st.subheader(f"✅ Matched Results ({len(match_rows):,} rows)")
+                                st.dataframe(match_df.head(100), use_container_width=True)
+                                
+                                # Download button
+                                excel_data = create_downloadable_excel(match_df, "matched_results.xlsx")
+                                st.download_button(
+                                    label="📥 Download Matched Results",
+                                    data=excel_data,
+                                    file_name=f"matched_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                            else:
+                                st.info("No matched results found.")
+                        
+                        with tab3:
+                            if no_match_rows:
+                                no_match_df = pd.DataFrame(no_match_rows)
+                                st.subheader(f"❌ No Match Results ({len(no_match_rows):,} rows)")
+                                st.dataframe(no_match_df.head(100), use_container_width=True)
+                                
+                                # Download button
+                                excel_data = create_downloadable_excel(no_match_df, "no_match_results.xlsx")
+                                st.download_button(
+                                    label="📥 Download No Match Results",
+                                    data=excel_data,
+                                    file_name=f"no_match_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                            else:
+                                st.info("No unmatched results found.")
+                        
+                        # Download all results as ZIP
+                        if match_rows or no_match_rows:
+                            st.subheader("📦 Download All Results")
+                            
+                            # Create ZIP file
+                            zip_buffer = io.BytesIO()
+                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                if match_rows:
+                                    match_excel = create_downloadable_excel(pd.DataFrame(match_rows), "matched_results.xlsx")
+                                    zip_file.writestr("matched_results.xlsx", match_excel)
+                                
+                                if no_match_rows:
+                                    no_match_excel = create_downloadable_excel(pd.DataFrame(no_match_rows), "no_match_results.xlsx")
+                                    zip_file.writestr("no_match_results.xlsx", no_match_excel)
+                                
+                                # Add summary
+                                summary = {
+                                    'processing_completed': datetime.now().isoformat(),
+                                    'total_processed_rows': total_processed,
+                                    'matched_count': len(match_rows),
+                                    'no_match_count': len(no_match_rows),
+                                    'match_rate_percent': match_rate,
+                                    'processing_time_seconds': processing_time
+                                }
+                                zip_file.writestr("summary.json", json.dumps(summary, indent=2))
+                            
+                            zip_buffer.seek(0)
+                            
+                            st.download_button(
+                                label="📥 Download Complete Results Package (ZIP)",
+                                data=zip_buffer.getvalue(),
+                                file_name=f"resistance_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                                mime="application/zip"
+                            )
+                
+                except Exception as e:
+                    st.error(f"❌ Error during processing: {str(e)}")
+                    st.exception(e)
 
         except Exception as e:
-            print(f"\n❌ Error during processing: {str(e)}")
-            self.save_checkpoint(self.processed_count, batch_files)
-            print("💾 Progress saved. Check the error and resume later.")
-            raise
+            st.error(f"❌ Error loading file: {str(e)}")
+            st.exception(e)
+    
+    else:
+        # Show instructions and examples
+        st.info("👆 Upload an Excel file to get started")
+        
+        st.subheader("📖 How it Works")
+        
+        st.markdown("""
+        This tool parses resistance codes from part numbers using multiple rules:
+        
+        **🔍 Supported Patterns:**
+        - **R-Decimal**: `R047` → 0.047Ω, `47R2` → 47.2Ω
+        - **4-Digit Rule 1**: `123K` → 123 × 10⁻² = 1.23Ω  
+        - **4-Digit Rule 2**: `47B2` → 47.2Ω, `6H11` → 6.11KΩ
+        - **Traditional**: `472` → 47 × 10² = 4700Ω
+        
+        **📊 Output Files:**
+        - **Matched**: Parts where parsed value matches target value
+        - **No Match**: Parts with no pattern or no good match
+        """)
+        
+        st.subheader("📋 Required Columns")
+        st.markdown("""
+        Your Excel file should contain:
+        - **PartNumber** (required): The part number to parse
+        - **Value** (optional): Target resistance value for matching
+        - Other columns will be preserved in output
+        """)
+        
+        st.subheader("🧪 Example Patterns")
+        examples_df = pd.DataFrame([
+            {"Part Number": "MCR100JZHJSR047", "Expected": "0.047 Ω", "Rule": "R-Decimal"},
+            {"Part Number": "PA1206FRE470R012Z", "Expected": "0.012 Ω", "Rule": "R-Decimal"}, 
+            {"Part Number": "CHP1206L75R0JNT", "Expected": "75.0 Ω", "Rule": "R-Decimal"},
+            {"Part Number": "TEST123K456", "Expected": "1.23 Ω", "Rule": "4-Digit Rule 1"},
+            {"Part Number": "ABC47B2DEF", "Expected": "47.2 Ω", "Rule": "4-Digit Rule 2"},
+            {"Part Number": "XYZ4701GHI", "Expected": "4700 Ω", "Rule": "Traditional"}
+        ])
+        st.dataframe(examples_df, use_container_width=True)
 
-        self.combine_batches(batch_files)
-
-        if os.path.exists(self.checkpoint_file):
-            os.remove(self.checkpoint_file)
-
-        total_time = time.time() - self.start_time
-        print(f"\n🎉 Processing completed in {timedelta(seconds=int(total_time))}")
-        print(f"📊 Processed {self.processed_count:,} rows")
-        print(f"⚡ Average speed: {self.processed_count/total_time:.1f} rows/second")
+if __name__ == "__main__":
+    main()
