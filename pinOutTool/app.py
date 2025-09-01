@@ -4,29 +4,70 @@ import re
 import io
 from datetime import datetime
 
+
 def normalize_pin_group(pin: str) -> str:
     """
     Normalize pin names into logical groups.
     Removes digits, keeps letters, '-', and '#'.
-    Preserves leading and trailing '-' or '#' if they match.
+    Groups all variations of words with same delimiters:
+    - Any word with '-' at start OR end becomes "-WORD-" 
+    - Any word with '#' at start OR end becomes "#WORD#"
+    - Words with both '-' and '#' prioritize '#'
     """
-    # Handle empty strings or whitespace-only strings
-    if not pin or not pin.strip():
-        return ""
-
     pin = str(pin).upper().strip()
+    
+    # Remove digits first
+    pin_no_digits = re.sub(r'\d', '', pin)
+    
+    # Keep only letters, #, and -
+    clean_pin = re.sub(r'[^A-Z#-]', '', pin_no_digits)
+    
+    if not clean_pin:
+        return clean_pin
+    
+    # Extract all letters (the core words)
+    letters_only = re.sub(r'[^A-Z]', '', clean_pin)
+    
+    if not letters_only:
+        return clean_pin
+    
+    # Check for presence of delimiters
+    has_dash = '-' in clean_pin
+    has_hash = '#' in clean_pin
+    
+    # If both delimiters exist, prioritize # over -
+    if has_hash:
+        return f'#{letters_only}'
+    elif has_dash:
+        return f'-{letters_only}'
+    else:
+        # No delimiters, just return the letters
+        return letters_only
 
-    # Preserve matching start and end characters if both '-' or both '#'
-    if (pin.startswith('-') and pin.endswith('-')) or (pin.startswith('#') and pin.endswith('#')):
-        core = pin[1:-1]
-        core = re.sub(r'\d', '', core)  # remove digits
-        core = re.sub(r'[^A-Z#-]', '', core)  # keep only A-Z, #, -
-        return pin[0] + core + pin[-1]
 
-    # Otherwise: just remove digits, keep letters + - + #
-    pin = re.sub(r'\d', '', pin)
-    pin = re.sub(r'[^A-Z#-]', '', pin)
-    return pin
+# def normalize_pin_group(pin: str) -> str:
+#     """
+#     Normalize pin names into logical groups.
+#     Removes digits, keeps letters, '-', and '#'.
+#     Preserves leading and trailing '-' or '#' if they match.
+#     """
+#     # Handle empty strings or whitespace-only strings
+#     if not pin or not pin.strip():
+#         return ""
+
+#     pin = str(pin).upper().strip()
+
+#     # Preserve matching start and end characters if both '-' or both '#'
+#     if (pin.startswith('-') and pin.endswith('-')) or (pin.startswith('#') and pin.endswith('#')):
+#         core = pin[1:-1]
+#         core = re.sub(r'\d', '', core)  # remove digits
+#         core = re.sub(r'[^A-Z#-]', '', core)  # keep only A-Z, #, -
+#         return pin[0] + core + pin[-1]
+
+#     # Otherwise: just remove digits, keep letters + - + #
+#     pin = re.sub(r'\d', '', pin)
+#     pin = re.sub(r'[^A-Z#-]', '', pin)
+#     return pin
 
 def process_excel(df):
     """Process the uploaded dataframe"""
