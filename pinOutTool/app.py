@@ -176,121 +176,121 @@ def main():
             show_statistics = st.checkbox("Show processing statistics", value=True)
 
         if uploaded_file is not None:
-        try:
-            # Load the uploaded file
-            df = pd.read_excel(uploaded_file, dtype=str, keep_default_na=False)
-            
-            # Validate required columns
-            required_columns = ["DataDefinition", "Pin Name", "Normalized Pin NAME", "PartsCount"]
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            
-            if missing_columns:
-                st.error(f"Missing required columns: {', '.join(missing_columns)}")
-                st.info("Please use the template file format from the sidebar.")
-                return
-            
-            st.success(f"✅ File uploaded successfully! Found {len(df)} rows.")
-            
-            if show_preview:
-                st.subheader("📊 Data Preview")
-                st.dataframe(df.head(10), use_container_width=True)
-            
-            # Process the data
-            with st.spinner("Processing data..."):
-                processed_df = process_excel(df)
-                summary_df = summarize_all_normalized(processed_df)
-            
-            # Update main dataframe with status and percentage
-            merged_df = processed_df.merge(
-                summary_df[["DataDefinition", "PinGroup", "Normalized Pin NAME", "Percentage", "Status"]],
-                on=["DataDefinition", "PinGroup", "Normalized Pin NAME"],
-                how="left"
-            )
-            merged_df["Status"] = merged_df["Status"].fillna("Case Sensitive Different")
-            
-            st.success("✅ Processing completed!")
-            
-            # Show statistics
-            if show_statistics:
-                st.subheader("📈 Processing Statistics")
-                col1, col2, col3, col4 = st.columns(4)
+            try:
+                # Load the uploaded file
+                df = pd.read_excel(uploaded_file, dtype=str, keep_default_na=False)
+                
+                # Validate required columns
+                required_columns = ["DataDefinition", "Pin Name", "Normalized Pin NAME", "PartsCount"]
+                missing_columns = [col for col in required_columns if col not in df.columns]
+                
+                if missing_columns:
+                    st.error(f"Missing required columns: {', '.join(missing_columns)}")
+                    st.info("Please use the template file format from the Template tab.")
+                    return
+                
+                st.success(f"✅ File uploaded successfully! Found {len(df)} rows.")
+                
+                if show_preview:
+                    st.subheader("📊 Data Preview")
+                    st.dataframe(df.head(10), use_container_width=True)
+                
+                # Process the data
+                with st.spinner("Processing data..."):
+                    processed_df = process_excel(df)
+                    summary_df = summarize_all_normalized(processed_df)
+                
+                # Update main dataframe with status and percentage
+                merged_df = processed_df.merge(
+                    summary_df[["DataDefinition", "PinGroup", "Normalized Pin NAME", "Percentage", "Status"]],
+                    on=["DataDefinition", "PinGroup", "Normalized Pin NAME"],
+                    how="left"
+                )
+                merged_df["Status"] = merged_df["Status"].fillna("Case Sensitive Different")
+                
+                st.success("✅ Processing completed!")
+                
+                # Show statistics
+                if show_statistics:
+                    st.subheader("📈 Processing Statistics")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Total Rows", len(merged_df))
+                    with col2:
+                        st.metric("Unique DataDefinitions", merged_df["DataDefinition"].nunique())
+                    with col3:
+                        st.metric("Unique Pin Groups", merged_df["PinGroup"].nunique())
+                    with col4:
+                        conflicts = (merged_df["Status"] == "Conflict in same PL | Pin name").sum()
+                        st.metric("Conflicts Detected", conflicts)
+                
+                # Display results in tabs
+                tab1a, tab2a, tab3a = st.tabs(["📋 Processed Data", "📊 Summary", "⚠️ Conflicts"])
+                
+                with tab1a:
+                    st.subheader("Processed Data with Status")
+                    st.dataframe(merged_df, use_container_width=True)
+                    
+                    # Download processed data
+                    processed_bytes = to_excel_bytes(merged_df, "Processed_Data")
+                    st.download_button(
+                        label="📥 Download Processed Data",
+                        data=processed_bytes,
+                        file_name=f"processed_pin_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                
+                with tab2a:
+                    st.subheader("Summary by Pin Groups")
+                    st.dataframe(summary_df, use_container_width=True)
+                    
+                    # Download summary
+                    summary_bytes = to_excel_bytes(summary_df, "Summary")
+                    st.download_button(
+                        label="📥 Download Summary",
+                        data=summary_bytes,
+                        file_name=f"pin_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                
+                with tab3a:
+                    st.subheader("Detected Conflicts")
+                    conflicts_df = merged_df[merged_df["Status"] == "Conflict in same PL | Pin name"]
+                    
+                    if len(conflicts_df) > 0:
+                        st.warning(f"Found {len(conflicts_df)} rows with conflicts")
+                        st.dataframe(conflicts_df, use_container_width=True)
+                        
+                        # Show conflict summary
+                        st.subheader("Conflict Summary by DataDefinition")
+                        conflict_summary = conflicts_df.groupby("DataDefinition").agg({
+                            "Pin Name": "count",
+                            "PinGroup": "nunique"
+                        }).rename(columns={"Pin Name": "Conflict_Count", "PinGroup": "Affected_Groups"})
+                        st.dataframe(conflict_summary, use_container_width=True)
+                    else:
+                        st.success("🎉 No conflicts detected!")
+                
+                # Additional insights
+                st.subheader("📊 Data Insights")
+                col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.metric("Total Rows", len(merged_df))
+                    st.markdown("**Top 5 Pin Groups by Frequency:**")
+                    pin_group_counts = merged_df["PinGroup"].value_counts().head()
+                    for pin_group, count in pin_group_counts.items():
+                        st.write(f"• {pin_group}: {count} occurrences")
+                
                 with col2:
-                    st.metric("Unique DataDefinitions", merged_df["DataDefinition"].nunique())
-                with col3:
-                    st.metric("Unique Pin Groups", merged_df["PinGroup"].nunique())
-                with col4:
-                    conflicts = (merged_df["Status"] == "Conflict in same PL | Pin name").sum()
-                    st.metric("Conflicts Detected", conflicts)
-            
-            # Display results in tabs
-            tab1, tab2, tab3 = st.tabs(["📋 Processed Data", "📊 Summary", "⚠️ Conflicts"])
-            
-            with tab1:
-                st.subheader("Processed Data with Status")
-                st.dataframe(merged_df, use_container_width=True)
-                
-                # Download processed data
-                processed_bytes = to_excel_bytes(merged_df, "Processed_Data")
-                st.download_button(
-                    label="📥 Download Processed Data",
-                    data=processed_bytes,
-                    file_name=f"processed_pin_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            
-            with tab2:
-                st.subheader("Summary by Pin Groups")
-                st.dataframe(summary_df, use_container_width=True)
-                
-                # Download summary
-                summary_bytes = to_excel_bytes(summary_df, "Summary")
-                st.download_button(
-                    label="📥 Download Summary",
-                    data=summary_bytes,
-                    file_name=f"pin_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            
-            with tab3:
-                st.subheader("Detected Conflicts")
-                conflicts_df = merged_df[merged_df["Status"] == "Conflict in same PL | Pin name"]
-                
-                if len(conflicts_df) > 0:
-                    st.warning(f"Found {len(conflicts_df)} rows with conflicts")
-                    st.dataframe(conflicts_df, use_container_width=True)
-                    
-                    # Show conflict summary
-                    st.subheader("Conflict Summary by DataDefinition")
-                    conflict_summary = conflicts_df.groupby("DataDefinition").agg({
-                        "Pin Name": "count",
-                        "PinGroup": "nunique"
-                    }).rename(columns={"Pin Name": "Conflict_Count", "PinGroup": "Affected_Groups"})
-                    st.dataframe(conflict_summary, use_container_width=True)
-                else:
-                    st.success("🎉 No conflicts detected!")
-            
-            # Additional insights
-            st.subheader("📊 Data Insights")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**Top 5 Pin Groups by Frequency:**")
-                pin_group_counts = merged_df["PinGroup"].value_counts().head()
-                for pin_group, count in pin_group_counts.items():
-                    st.write(f"• {pin_group}: {count} occurrences")
-            
-            with col2:
-                st.markdown("**Data Definitions Overview:**")
-                dd_counts = merged_df["DataDefinition"].value_counts()
-                for dd, count in dd_counts.items():
-                    st.write(f"• {dd}: {count} pins")
-                    
-        except Exception as e:
-            st.error(f"Error processing file: {str(e)}")
-            st.info("Please check that your file matches the template format from the Template tab.")
+                    st.markdown("**Data Definitions Overview:**")
+                    dd_counts = merged_df["DataDefinition"].value_counts()
+                    for dd, count in dd_counts.items():
+                        st.write(f"• {dd}: {count} pins")
+                        
+            except Exception as e:
+                st.error(f"Error processing file: {str(e)}")
+                st.info("Please check that your file matches the template format from the Template tab.")
     
     with tab2:
         st.header("📋 How to Use This Tool")
