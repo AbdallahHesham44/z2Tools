@@ -7,34 +7,40 @@ from datetime import datetime
 def normalize_pin_group(pin: str) -> str:
     """
     Normalize pin names into logical groups.
-    Works for VIN, VOUT, GND, etc.
+    Removes digits, keeps letters, '-', and '#'.
+    Preserves leading and trailing '-' or '#' if they match.
     """
+    # Handle empty strings or whitespace-only strings
+    if not pin or not pin.strip():
+        return ""
+
     pin = str(pin).upper().strip()
 
-    # +PREFIX / -PREFIX → PREFIX
-    m = re.match(r"^[+-]?([A-Z]+)$", pin)
-    if m:
-        return m.group(1)
+    # Preserve matching start and end characters if both '-' or both '#'
+    if (pin.startswith('-') and pin.endswith('-')) or (pin.startswith('#') and pin.endswith('#')):
+        core = pin[1:-1]
+        core = re.sub(r'\d', '', core)  # remove digits
+        core = re.sub(r'[^A-Z#-]', '', core)  # keep only A-Z, #, -
+        return pin[0] + core + pin[-1]
 
-    # PREFIX + number → PREFIX
-    m = re.match(r"^([A-Z]+)\d+$", pin)
-    if m:
-        return m.group(1)
-
-    # Otherwise keep as-is (e.g. VINCOM, VOUTCOM, AVIN, etc.)
+    # Otherwise: just remove digits, keep letters + - + #
+    pin = re.sub(r'\d', '', pin)
+    pin = re.sub(r'[^A-Z#-]', '', pin)
     return pin
 
+def process_excel(df):
+    """Process the uploaded dataframe"""
+    # Ensure 'PartsCount' is numeric
+    df['PartsCount'] = pd.to_numeric(df['PartsCount'], errors='coerce')
+    df = df.dropna(subset=['PartsCount'])  # Drop rows where conversion failed
 
-def process_excel_data(df):
-    """
-    Process the uploaded dataframe and return processed results
-    """
-    # Create normalized pin group
+    # Create PinGroup column for grouping, but keep original Pin Name intact
     df["PinGroup"] = df["Pin Name"].apply(normalize_pin_group)
 
     # ---- EXACT GROUP (DataDefinition + Pin Name) ----
+    # Use original Pin Name column, not modified version
     exact_stats = (
-        df.groupby(["DataDefinition", "Pin Name"])["Normalized Pin NAME"]
+        df.groupby(["DataDefinition", "Pin Name"], dropna=False)["Normalized Pin NAME"]
         .agg(["nunique", lambda x: len(set(x)) > 1])
         .reset_index()
         .rename(columns={"nunique": "CountExact", "<lambda_0>": "DiffExact"})
@@ -42,227 +48,400 @@ def process_excel_data(df):
 
     # ---- SIMILARITY GROUP (DataDefinition + PinGroup) ----
     sim_stats = (
-        df.groupby(["DataDefinition", "PinGroup"])["Normalized Pin NAME"]
+        df.groupby(["DataDefinition", "PinGroup"], dropna=False)["Normalized Pin NAME"]
         .agg(["nunique", lambda x: len(set(x)) > 1])
         .reset_index()
         .rename(columns={"nunique": "CountSim", "<lambda_0>": "DiffSim"})
     )
 
     # ---- Merge back to main ----
-    final_df = df.merge(exact_stats, on=["DataDefinition", "Pin Name"], how="left")
-    final_df = final_df.merge(sim_stats, on=["DataDefinition", "PinGroup"], how="left")
+    final_df = df.merge(exact_stats,
+                        on=["DataDefinition", "Pin Name"],
+                        how="left")
+    final_df = final_df.merge(sim_stats,
+                              on=["DataDefinition", "PinGroup"],
+                              how="left")
 
     return final_df
 
-
-def summarize_all_normalized(df):
+def summarize_all_normalized(df_proc):
     """
     Summarize PartsCount for all Normalized Pin NAME values within
     each (DataDefinition, PinGroup). Produces percentages for each.
-    Keeps original Normalized Pin NAME spellings in output.
+    Adds a Status column.
     """
-    # Keep original and add lowercase for comparison
-    df["Norm_lower"] = df["Normalized Pin NAME"].astype(str).str.lower()
+    # Ensure 'PartsCount' is numeric for calculations
+    df_proc['PartsCount'] = pd.to_numeric(df_proc['PartsCount'], errors='coerce').fillna(0)
 
-    # Filter rows where CountExact != 1
-    df_filtered = df[df["CountExact"] != 1]
+    # For calculations, normalize case but don't modify original data
+    df_proc["Norm_lower"] = df_proc["Normalized Pin NAME"].astype(str).str.upper()
 
     results = []
 
-    # Loop by DataDefinition
-    for dd, group_dd in df_filtered.groupby("DataDefinition"):
-        # Loop by PinGroup
-        for pg, group_pg in group_dd.groupby("PinGroup"):
+    # Loop by DataDefinition + PinGroup
+    for (dd, pg), group_pg in df_proc.groupby(["DataDefinition", "PinGroup"]):
+        norm_sums = group_pg.groupby("Norm_lower")["PartsCount"].sum()
+        total = norm_sums.sum()
+        max_norm = norm_sums.idxmax() if not norm_sums.empty else None
 
-            # Sum PartsCount for each lowercase Normalized Pin NAME
-            norm_sums = group_pg.groupby("Norm_lower")["PartsCount"].sum()
+        for norm_lower, cnt in norm_sums.items():
+            perc = (cnt / total * 100) if total > 0 else 0
+            # Find the first original Normalized Pin NAME for this group
+            original_name_series = group_pg.loc[group_pg["Norm_lower"] == norm_lower, "Normalized Pin NAME"]
+            original_name = original_name_series.iloc[0] if not original_name_series.empty else "Unknown"
 
-            total = norm_sums.sum()
+            status = "seems Ok" if norm_lower == max_norm else "Conflict in same PL | Pin name"
 
-            for norm_lower, cnt in norm_sums.items():
-                perc = (cnt / total * 100) if total > 0 else 0
-
-                # Pick one representative original spelling (first one in group)
-                original_name = (
-                    group_pg.loc[group_pg["Norm_lower"] == norm_lower, "Normalized Pin NAME"]
-                    .iloc[0]
-                )
-
-                results.append({
-                    "DataDefinition": dd,
-                    "SumCountExact": total,   # total for this group
-                    "PinGroup": pg,
-                    "Normalized Pin NAME": original_name,  # back to original spelling
-                    "Percentage": round(perc, 2),
-                    "PartsCount": cnt
-                })
+            results.append({
+                "DataDefinition": dd,
+                "SumCountExact": total,
+                "PinGroup": pg,
+                "Normalized Pin NAME": original_name,
+                "Percentage": round(perc, 2),
+                "PartsCount": cnt,
+                "Status": status
+            })
 
     summary_df = pd.DataFrame(results)
     return summary_df
 
+def create_template():
+    """Create a template Excel file for users to download"""
+    template_data = {
+        "DataDefinition": [
+            "ConnectorA_Type1",
+            "ConnectorA_Type1", 
+            "ConnectorB_Type2",
+            "ConnectorB_Type2",
+            "ConnectorC_Type3"
+        ],
+        "Pin Name": [
+            "VCC12",
+            "GND1",
+            "DATA-1",
+            "CLK#2",
+            "RST"
+        ],
+        "Normalized Pin NAME": [
+            "VCC",
+            "GND",
+            "DATA",
+            "CLK",
+            "RESET"
+        ],
+        "PartsCount": [
+            100,
+            150,
+            75,
+            80,
+            45
+        ]
+    }
+    
+    template_df = pd.DataFrame(template_data)
+    return template_df
 
-def to_excel_bytes(df1, df2, sheet1_name="Processed Data", sheet2_name="Summary"):
-    """
-    Convert dataframes to Excel bytes for download
-    """
+def to_excel_bytes(df, sheet_name="Sheet1"):
+    """Convert dataframe to Excel bytes for download"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df1.to_excel(writer, sheet_name=sheet1_name, index=False)
-        df2.to_excel(writer, sheet_name=sheet2_name, index=False)
-    processed_data = output.getvalue()
-    return processed_data
-
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+    return output.getvalue()
 
 # Streamlit App
 def main():
-    st.set_page_config(
-        page_title="Pin Analysis Tool",
-        page_icon="🔌",
-        layout="wide"
-    )
-
+    st.set_page_config(page_title="Pin Analysis Tool", page_icon="🔌", layout="wide")
+    
     st.title("🔌 Pin Analysis Tool")
-    st.markdown("Upload your Excel file to analyze pin data and generate summaries")
+    st.markdown("Analyze pin names and detect conflicts in connector definitions")
+    
+    # Create main tabs
+    tab1, tab2, tab3 = st.tabs(["📤 Upload & Process", "📋 Instructions", "📄 Template & Download"])
+    
+    with tab1:
+        # Main content area
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.header("📤 Upload Your File")
+            uploaded_file = st.file_uploader(
+                "Choose an Excel file",
+                type=['xlsx', 'xls'],
+                help="Upload your Excel file with pin data. Use the template format from the Template tab."
+            )
+        
+        with col2:
+            st.header("⚙️ Processing Options")
+            show_preview = st.checkbox("Show data preview", value=True)
+            show_statistics = st.checkbox("Show processing statistics", value=True)
 
-    # File upload
-    uploaded_file = st.file_uploader(
-        "Choose an Excel file",
-        type=['xlsx', 'xls'],
-        help="Upload your PINOUT Excel file for analysis"
-    )
-
-    if uploaded_file is not None:
+        if uploaded_file is not None:
         try:
-            # Read the uploaded file
-            with st.spinner('Loading data...'):
-                df = pd.read_excel(uploaded_file)
+            # Load the uploaded file
+            df = pd.read_excel(uploaded_file, dtype=str, keep_default_na=False)
             
-            st.success(f"✅ File loaded successfully! Shape: {df.shape}")
-            
-            # Show original data preview
-            with st.expander("📊 Preview Original Data", expanded=False):
-                st.dataframe(df.head(10))
-                st.write(f"**Columns:** {list(df.columns)}")
-                st.write(f"**Total rows:** {len(df)}")
-
-            # Check for required columns
-            required_columns = ["Pin Name", "Normalized Pin NAME", "DataDefinition", "PartsCount"]
+            # Validate required columns
+            required_columns = ["DataDefinition", "Pin Name", "Normalized Pin NAME", "PartsCount"]
             missing_columns = [col for col in required_columns if col not in df.columns]
             
             if missing_columns:
-                st.error(f"❌ Missing required columns: {missing_columns}")
-                st.stop()
-
-            # Process data
-            with st.spinner('Processing data...'):
-                processed_df = process_excel_data(df)
+                st.error(f"Missing required columns: {', '.join(missing_columns)}")
+                st.info("Please use the template file format from the sidebar.")
+                return
+            
+            st.success(f"✅ File uploaded successfully! Found {len(df)} rows.")
+            
+            if show_preview:
+                st.subheader("📊 Data Preview")
+                st.dataframe(df.head(10), use_container_width=True)
+            
+            # Process the data
+            with st.spinner("Processing data..."):
+                processed_df = process_excel(df)
                 summary_df = summarize_all_normalized(processed_df)
-
-            # Create columns for results
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.subheader("📈 Processed Data")
-                st.write(f"**Rows:** {len(processed_df)}")
-                with st.expander("View Processed Data", expanded=False):
-                    st.dataframe(processed_df)
-
-            with col2:
-                st.subheader("📊 Summary Analysis")
-                st.write(f"**Rows:** {len(summary_df)}")
-                with st.expander("View Summary", expanded=True):
-                    st.dataframe(summary_df)
-
-            # Statistics
-            st.subheader("📋 Analysis Statistics")
-            col1, col2, col3, col4 = st.columns(4)
             
-            with col1:
-                st.metric("Total Pin Groups", processed_df["PinGroup"].nunique())
+            # Update main dataframe with status and percentage
+            merged_df = processed_df.merge(
+                summary_df[["DataDefinition", "PinGroup", "Normalized Pin NAME", "Percentage", "Status"]],
+                on=["DataDefinition", "PinGroup", "Normalized Pin NAME"],
+                how="left"
+            )
+            merged_df["Status"] = merged_df["Status"].fillna("Case Sensitive Different")
             
-            with col2:
-                st.metric("Data Definitions", processed_df["DataDefinition"].nunique())
+            st.success("✅ Processing completed!")
             
-            with col3:
-                st.metric("Unique Pins", processed_df["Pin Name"].nunique())
-            
-            with col4:
-                st.metric("Summary Entries", len(summary_df))
-
-            # Charts
-            if not summary_df.empty:
-                st.subheader("📊 Data Visualization")
-                
-                col1, col2 = st.columns(2)
+            # Show statistics
+            if show_statistics:
+                st.subheader("📈 Processing Statistics")
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    st.write("**Top 10 Pin Groups by Parts Count**")
-                    top_pingroups = summary_df.groupby("PinGroup")["PartsCount"].sum().sort_values(ascending=False).head(10)
-                    st.bar_chart(top_pingroups)
-                
+                    st.metric("Total Rows", len(merged_df))
                 with col2:
-                    st.write("**Data Definition Distribution**")
-                    dd_dist = summary_df["DataDefinition"].value_counts().head(10)
-                    st.bar_chart(dd_dist)
-
-            # Download section
-            st.subheader("💾 Download Results")
+                    st.metric("Unique DataDefinitions", merged_df["DataDefinition"].nunique())
+                with col3:
+                    st.metric("Unique Pin Groups", merged_df["PinGroup"].nunique())
+                with col4:
+                    conflicts = (merged_df["Status"] == "Conflict in same PL | Pin name").sum()
+                    st.metric("Conflicts Detected", conflicts)
             
-            # Generate Excel file
-            excel_data = to_excel_bytes(processed_df, summary_df)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"pin_analysis_results_{timestamp}.xlsx"
+            # Display results in tabs
+            tab1, tab2, tab3 = st.tabs(["📋 Processed Data", "📊 Summary", "⚠️ Conflicts"])
             
-            st.download_button(
-                label="📥 Download Excel Results",
-                data=excel_data,
-                file_name=filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                help="Download both processed data and summary in Excel format"
-            )
-
-            # Individual CSV downloads
+            with tab1:
+                st.subheader("Processed Data with Status")
+                st.dataframe(merged_df, use_container_width=True)
+                
+                # Download processed data
+                processed_bytes = to_excel_bytes(merged_df, "Processed_Data")
+                st.download_button(
+                    label="📥 Download Processed Data",
+                    data=processed_bytes,
+                    file_name=f"processed_pin_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            with tab2:
+                st.subheader("Summary by Pin Groups")
+                st.dataframe(summary_df, use_container_width=True)
+                
+                # Download summary
+                summary_bytes = to_excel_bytes(summary_df, "Summary")
+                st.download_button(
+                    label="📥 Download Summary",
+                    data=summary_bytes,
+                    file_name=f"pin_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            with tab3:
+                st.subheader("Detected Conflicts")
+                conflicts_df = merged_df[merged_df["Status"] == "Conflict in same PL | Pin name"]
+                
+                if len(conflicts_df) > 0:
+                    st.warning(f"Found {len(conflicts_df)} rows with conflicts")
+                    st.dataframe(conflicts_df, use_container_width=True)
+                    
+                    # Show conflict summary
+                    st.subheader("Conflict Summary by DataDefinition")
+                    conflict_summary = conflicts_df.groupby("DataDefinition").agg({
+                        "Pin Name": "count",
+                        "PinGroup": "nunique"
+                    }).rename(columns={"Pin Name": "Conflict_Count", "PinGroup": "Affected_Groups"})
+                    st.dataframe(conflict_summary, use_container_width=True)
+                else:
+                    st.success("🎉 No conflicts detected!")
+            
+            # Additional insights
+            st.subheader("📊 Data Insights")
             col1, col2 = st.columns(2)
             
             with col1:
-                processed_csv = processed_df.to_csv(index=False)
-                st.download_button(
-                    label="📄 Download Processed Data (CSV)",
-                    data=processed_csv,
-                    file_name=f"processed_data_{timestamp}.csv",
-                    mime="text/csv"
-                )
+                st.markdown("**Top 5 Pin Groups by Frequency:**")
+                pin_group_counts = merged_df["PinGroup"].value_counts().head()
+                for pin_group, count in pin_group_counts.items():
+                    st.write(f"• {pin_group}: {count} occurrences")
             
             with col2:
-                summary_csv = summary_df.to_csv(index=False)
-                st.download_button(
-                    label="📄 Download Summary (CSV)",
-                    data=summary_csv,
-                    file_name=f"summary_data_{timestamp}.csv",
-                    mime="text/csv"
-                )
-
+                st.markdown("**Data Definitions Overview:**")
+                dd_counts = merged_df["DataDefinition"].value_counts()
+                for dd, count in dd_counts.items():
+                    st.write(f"• {dd}: {count} pins")
+                    
         except Exception as e:
-            st.error(f"❌ Error processing file: {str(e)}")
-            st.write("Please check that your file has the required columns:")
-            st.write("- Pin Name")
-            st.write("- Normalized Pin NAME") 
-            st.write("- DataDefinition")
-            st.write("- PartsCount")
-
-    else:
-        st.info("👆 Please upload an Excel file to get started")
+            st.error(f"Error processing file: {str(e)}")
+            st.info("Please check that your file matches the template format from the Template tab.")
+    
+    with tab2:
+        st.header("📋 How to Use This Tool")
         
-        # Show sample data format
-        with st.expander("📝 Expected File Format", expanded=False):
-            sample_data = pd.DataFrame({
-                'Pin Name': ['VIN1', 'VOUT2', 'GND', '+VCC'],
-                'Normalized Pin NAME': ['VIN_NORM', 'VOUT_NORM', 'GND_NORM', 'VCC_NORM'],
-                'DataDefinition': ['Type A', 'Type A', 'Type B', 'Type B'],
-                'PartsCount': [10, 15, 8, 12]
+        st.markdown("""
+        ## 🎯 Purpose
+        This tool analyzes pin naming conventions in connector definitions to detect conflicts and inconsistencies.
+        
+        ## 📝 Step-by-Step Instructions
+        
+        ### Step 1: Prepare Your Data
+        1. Organize your pin data in Excel format (.xlsx or .xls)
+        2. Ensure your file has the required columns (see Template tab)
+        3. Make sure PartsCount column contains only numeric values
+        
+        ### Step 2: Upload and Process
+        1. Go to the "Upload & Process" tab
+        2. Click "Browse files" and select your Excel file
+        3. Enable preview options if desired
+        4. The tool will automatically validate and process your data
+        
+        ### Step 3: Review Results
+        - **Processed Data**: View your original data with added analysis columns
+        - **Summary**: See aggregated statistics by pin groups
+        - **Conflicts**: Review any detected naming conflicts
+        
+        ### Step 4: Download Results
+        - Download processed data with status indicators
+        - Download summary report for analysis
+        - Use timestamp-based filenames to avoid overwrites
+        """)
+        
+        st.markdown("""
+        ## 🔍 What the Tool Does
+        
+        ### Pin Group Normalization
+        The tool groups similar pin names by:
+        - Converting to uppercase
+        - Removing all digits (0-9)
+        - Keeping only letters (A-Z), hyphens (-), and hash symbols (#)
+        - Preserving matching start/end characters
+        
+        ### Conflict Detection
+        Identifies when multiple normalized pin names exist within the same:
+        - DataDefinition (connector type)
+        - PinGroup (normalized group)
+        
+        ### Status Assignment
+        - **"seems Ok"**: Pin name is the dominant version in its group
+        - **"Conflict in same PL | Pin name"**: Multiple conflicting pin names detected
+        - **"Case Sensitive Different"**: Case sensitivity differences found
+        """)
+        
+        st.markdown("""
+        ## 📊 Understanding Results
+        
+        ### Processed Data Columns
+        - **PinGroup**: Normalized grouping for similar pins
+        - **CountExact**: Count of exact pin name matches
+        - **DiffExact**: Boolean indicating if differences exist in exact matches
+        - **CountSim**: Count of similar pin names in the group
+        - **DiffSim**: Boolean indicating if differences exist in similar names
+        - **Status**: Conflict status for each pin
+        - **Percentage**: Percentage of parts count within the pin group
+        
+        ### Summary Report
+        - Shows aggregated data by DataDefinition and PinGroup
+        - Includes total parts count and percentage breakdown
+        - Helps identify the most common pin naming patterns
+        """)
+        
+        st.markdown("""
+        ## ⚠️ Common Issues & Solutions
+        
+        | Issue | Solution |
+        |-------|----------|
+        | Missing required columns | Use the template file format |
+        | Non-numeric PartsCount | Ensure all PartsCount values are numbers |
+        | Empty file error | Check that your Excel file contains data rows |
+        | File format error | Save as .xlsx or .xls format |
+        | High conflict count | Review pin naming conventions for consistency |
+        """)
+    
+    with tab3:
+        st.header("📄 Template File & Downloads")
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("📥 Download Template")
+            st.markdown("Download the Excel template to get started:")
+            
+            template_df = create_template()
+            template_bytes = to_excel_bytes(template_df, "Template")
+            
+            st.download_button(
+                label="📄 Download Template File",
+                data=template_bytes,
+                file_name="pin_analysis_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+            
+            st.info("💡 This template includes sample data to show the exact format required.")
+        
+        with col2:
+            st.subheader("📋 Required Format")
+            st.markdown("Your Excel file must contain these columns:")
+            
+            required_cols = pd.DataFrame({
+                "Column Name": ["DataDefinition", "Pin Name", "Normalized Pin NAME", "PartsCount"],
+                "Data Type": ["Text", "Text", "Text", "Numeric"],
+                "Description": [
+                    "Connector type/definition identifier",
+                    "Original pin name (may contain numbers)",
+                    "Normalized pin name (without numbers)",
+                    "Number of parts (must be numeric)"
+                ]
             })
-            st.dataframe(sample_data)
-
+            st.dataframe(required_cols, use_container_width=True, hide_index=True)
+        
+        st.subheader("📊 Template Preview")
+        st.markdown("Here's what the template file contains:")
+        
+        template_df = create_template()
+        st.dataframe(template_df, use_container_width=True, hide_index=True)
+        
+        st.subheader("🔄 Example Transformations")
+        st.markdown("See how pin names are normalized:")
+        
+        examples = pd.DataFrame({
+            "Original Pin Name": ["VCC12", "GND1", "DATA-1", "CLK#2", "-RST3-", "#PWR5#"],
+            "Normalized Group": ["VCC", "GND", "DATA-", "CLK#", "-RST-", "#PWR#"],
+            "Explanation": [
+                "Removes digits, keeps letters",
+                "Removes digits, keeps letters", 
+                "Removes digits, preserves trailing dash",
+                "Removes digits, preserves hash symbol",
+                "Removes digits, preserves matching dashes",
+                "Removes digits, preserves matching hash symbols"
+            ]
+        })
+        st.dataframe(examples, use_container_width=True, hide_index=True)
+        
+        st.markdown("""
+        ### 📝 Notes:
+        - Pin names are case-insensitive for grouping
+        - Original pin names are preserved exactly as entered
+        - Empty or whitespace-only pin names are handled gracefully
+        - Special characters like '-' and '#' are preserved strategically
+        """)
 
 if __name__ == "__main__":
     main()
