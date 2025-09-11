@@ -18,26 +18,30 @@ if uploaded_file:
                 df[col] = df[col].fillna('').astype(str).str.strip()
         df['MaskedText'] = df['MaskedText'].str.rstrip('-')
 
-        # Step 1: Character-level diff function
-        def get_diff_chars(part, masked):
-            diff = ''
-            max_len = max(len(part), len(masked))
-            for i in range(max_len):
-                p_char = part[i] if i < len(part) else ''
-                m_char = masked[i] if i < len(masked) else ''
-                if p_char != m_char:
-                    diff += p_char
-            return diff if diff else 'no_diff'
+        # Step 1: find first mismatch index
+        def get_first_diff(part, masked):
+            min_len = min(len(part), len(masked))
+            for i in range(min_len):
+                if part[i] != masked[i]:
+                    return i
+            return min_len  # no mismatch, return end
+        
+        # Step 2: smarter diff_char + masked_code
+        def get_diff_and_masked_code(part, masked):
+            idx = get_first_diff(part, masked)
+            if idx >= len(part):
+                return "no_diff", ""
+            # suffix is only the differing trailing part
+            suffix = part[idx:]
+            # masked_code is the clean prefix
+            masked_code = part[:idx]
+            return suffix, masked_code
+        
+        df[['diff_char', 'masked_code']] = df.apply(
+            lambda row: pd.Series(get_diff_and_masked_code(row['PartNumber'], row['MaskedText'])),
+            axis=1
+        )
 
-        # Step 2: Generate diff_char and length flag
-        df['length'] = df.apply(
-            lambda row: 'lengthIssue' if len(row['MaskedText']) > len(row['PartNumber']) else 'lengthApprove',
-            axis=1
-        )
-        df['diff_char'] = df.apply(
-            lambda row: get_diff_chars(row['PartNumber'], row['MaskedText']),
-            axis=1
-        )
 
         # Step 3: Optional masked_code reconstruction from known suffix patterns
         df['masked_code'] = ''
