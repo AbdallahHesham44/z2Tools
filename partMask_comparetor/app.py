@@ -52,14 +52,16 @@ with tab1:
                 axis=1
             )
             
-            # Step 4: optional reconstruction - but don't replace masked_code if it already has a value
+            # Step 4: optional reconstruction - only for rows where no difference was initially found
+            # Get unique suffixes from rows that had differences
             suffix_list = df.loc[df['diff_char'] != 'no_diff', 'diff_char'].dropna().unique().tolist()
             suffix_list = sorted(suffix_list, key=len, reverse=True)
             
             for suffix_item in suffix_list:
                 if suffix_item:
-                    # Only update rows where diff_char is 'no_diff' AND the part ends with this suffix
-                    mask = (df['diff_char'] == 'no_diff') & (df['PartNumber'].str.endswith(suffix_item, na=False))
+                    # Only update rows where diff_char is 'no_diff' (no initial difference found)
+                    # AND the part ends with this suffix AND masked_code is currently empty
+                    mask = (df['diff_char'] == 'no_diff') & (df['PartNumber'].str.endswith(suffix_item, na=False)) & (df['masked_code'] == '')
                     if mask.any():
                         df.loc[mask, 'masked_code'] = df.loc[mask, 'PartNumber'].str[:-len(suffix_item)]
                         df.loc[mask, 'diff_char'] = suffix_item
