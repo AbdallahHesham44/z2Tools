@@ -24,21 +24,28 @@ if uploaded_file:
             for i in range(min_len):
                 if part[i] != masked[i]:
                     return i
-            return min_len  # no mismatch, return end
+            return min_len  # no mismatch → return end
         
         # Step 2: smarter diff_char + masked_code
         def get_diff_and_masked_code(part, masked):
             idx = get_first_diff(part, masked)
             if idx >= len(part):
                 return "no_diff", ""
-            # suffix is only the differing trailing part
-            suffix = part[idx:]
-            # masked_code is the clean prefix
+            # take only the first mismatch *segment* (letters until next '-')
+            import re
+            match = re.match(r"[A-Za-z]+", part[idx:])
+            suffix = match.group(0) if match else part[idx:]
             masked_code = part[:idx]
             return suffix, masked_code
         
         df[['diff_char', 'masked_code']] = df.apply(
             lambda row: pd.Series(get_diff_and_masked_code(row['PartNumber'], row['MaskedText'])),
+            axis=1
+        )
+        
+        # Step 3: add length flag again
+        df['length'] = df.apply(
+            lambda row: 'lengthIssue' if len(row['MaskedText']) > len(row['PartNumber']) else 'lengthApprove',
             axis=1
         )
 
