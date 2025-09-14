@@ -479,33 +479,33 @@ class EnhancedResistanceParser:
 
 def main():
    
-        tab_main, tab_template = st.tabs(["Parser Tool", "📥 Download Template"])
-    
-        with tab_template:
-            st.subheader("Download Input Template")
-            st.markdown("Use this template Excel file to ensure your data is in the correct format before uploading.")
-    
-            # Create a template dataframe
-            template_data = {
-                "PartNumber": ["AF0603FR-0782KL", "CRCW040210K0FKED"],
-                "Value": ["82 Kohm", "10 Kohm"],
-                "CompanyName": ["Yageo", "Vishay"],
-                "ProductLine": ["Resistors", "Resistors"],
-                "FeatureName": ["Thick Film", "Thin Film"]
-            }
-            df_template = pd.DataFrame(template_data)
-    
-            # Save template to buffer
-            buffer = BytesIO()
-            df_template.to_excel(buffer, index=False)
-    
-            # Add download button
-            st.download_button(
-                label="📥 Download Template Excel File",
-                data=buffer.getvalue(),
-                file_name="resistance_parser_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    tab_main, tab_template = st.tabs(["Parser Tool", "📥 Download Template"])
+
+    with tab_template:
+        st.subheader("Download Input Template")
+        st.markdown("Use this template Excel file to ensure your data is in the correct format before uploading.")
+
+        # Create a template dataframe
+        template_data = {
+            "PartNumber": ["AF0603FR-0782KL", "CRCW040210K0FKED"],
+            "Value": ["82 Kohm", "10 Kohm"],
+            "CompanyName": ["Yageo", "Vishay"],
+            "ProductLine": ["Resistors", "Resistors"],
+            "FeatureName": ["Thick Film", "Thin Film"]
+        }
+        df_template = pd.DataFrame(template_data)
+
+        # Save template to buffer
+        buffer = BytesIO()
+        df_template.to_excel(buffer, index=False)
+
+        # Add download button
+        st.download_button(
+            label="📥 Download Template Excel File",
+            data=buffer.getvalue(),
+            file_name="resistance_parser_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 
     with tab_main:
