@@ -477,295 +477,289 @@ class EnhancedResistanceParser:
         return self.matched_results, self.no_match_results
 
 
-def create_template_file():
-    """Create a sample template Excel file"""
-    template_data = {
-        'PartNumber': [
-            'AF0603FR-0782KL',
-            'CR0805-J1-103ELF',
-            'RC0402FR-07100RL',
-            'ERJ-2RKF4702X',
-            'CRCW06031K00FKEA',
-            'RT0603BRD071KL',
-            'RC0603JR-0747RL',
-            'ERJ-3EKF2200V',
-            'CRCW0805100KJNEA',
-            'RC1206FR-074R7L'
-        ],
-        'Value': [
-            '82 KOhm',
-            '10 KOhm',
-            '100 Ohm',
-            '47 KOhm',
-            '1 KOhm',
-            '1 KOhm',
-            '47 Ohm',
-            '220 Ohm',
-            '100 KOhm',
-            '4.7 Ohm'
-        ],
-        'CompanyName': [
-            'Yageo',
-            'Bourns Inc.',
-            'Yageo',
-            'Panasonic',
-            'Vishay Dale',
-            'Yageo',
-            'Yageo',
-            'Panasonic',
-            'Vishay Dale',
-            'Yageo'
-        ],
-        'ProductLine': [
-            'Thick Film Resistors',
-            'Thick Film Resistors',
-            'Thick Film Resistors',
-            'Thick Film Resistors',
-            'Thick Film Resistors',
-            'Thick Film Resistors',
-            'Thick Film Resistors',
-            'Thick Film Resistors',
-            'Thick Film Resistors',
-            'Thick Film Resistors'
-        ],
-        'FeatureName': [
-            'General Purpose',
-            'General Purpose',
-            'General Purpose',
-            'General Purpose',
-            'General Purpose',
-            'General Purpose',
-            'General Purpose',
-            'General Purpose',
-            'General Purpose',
-            'General Purpose'
-        ]
-    }
-    
-    df = pd.DataFrame(template_data)
-    buffer = BytesIO()
-    df.to_excel(buffer, index=False, sheet_name='Template')
-    return buffer.getvalue()
-
-
 def main():
-    st.title("⚡ Enhanced Resistance Code Parser")
-    st.markdown("Upload an Excel file with resistance part numbers to extract and match resistance values")
+    tab_main, tab_template = st.tabs(["Parser Tool", "📥 Download Template"])
+    with tab_template:
+        st.title("⚡ Enhanced Resistance Code Parser")
+        st.markdown("Upload an Excel file with resistance part numbers to extract and match resistance values")
+    
+        # Tabs for navigation
+        tab_main, tab_template = st.tabs(["Parser Tool", "📥 Download Template"])
+    
+        with tab_template:
+            st.subheader("Download Input Template")
+            st.markdown("Use this template Excel file to ensure your data is in the correct format before uploading.")
+    
+            # Create a template dataframe
+            template_data = {
+                "PartNumber": ["AF0603FR-0782KL", "CRCW040210K0FKED"],
+                "Value": ["82 Kohm", "10 Kohm"],
+                "CompanyName": ["Yageo", "Vishay"],
+                "ProductLine": ["Resistors", "Resistors"],
+                "FeatureName": ["Thick Film", "Thin Film"]
+            }
+            df_template = pd.DataFrame(template_data)
+    
+            # Save template to buffer
+            buffer = BytesIO()
+            df_template.to_excel(buffer, index=False)
+    
+            # Add download button
+            st.download_button(
+                label="📥 Download Template Excel File",
+                data=buffer.getvalue(),
+                file_name="resistance_parser_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
-    # Sidebar configuration
-    st.sidebar.header("Configuration")
-    
-    # Template download section
-    st.sidebar.subheader("📥 Download Template")
-    st.sidebar.markdown("Download a sample Excel template to understand the expected format")
-    
-    template_buffer = create_template_file()
-    st.sidebar.download_button(
-        label="📄 Download Excel Template",
-        data=template_buffer,
-        file_name="resistance_parser_template.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        help="Download this template to see the expected format for your data"
-    )
-    
-    st.sidebar.markdown("---")
-    
-    # File upload
-    uploaded_file = st.file_uploader(
-        "Choose an Excel file",
-        type=['xlsx', 'xls'],
-        help="Upload an Excel file containing part numbers and resistance values"
-    )
 
-    # Processing settings
-    st.sidebar.subheader("Processing Settings")
-    batch_size = st.sidebar.slider("Batch Size", 100, 10000, 1000, 100)
+    with tab_main:
+        st.title("⚡ Enhanced Resistance Code Parser")
+        st.markdown("Upload an Excel file with resistance part numbers to extract and match resistance values")
     
-    # Pattern testing section
-    st.sidebar.subheader("Pattern Testing")
-    test_part = st.sidebar.text_input("Test Part Number", "AF0603FR-0782KL")
-    test_value = st.sidebar.text_input("Expected Value", "82 Kohm")
-    
-    if st.sidebar.button("Test Pattern"):
-        parser = EnhancedResistanceParser()
-        results = parser.parse_all_resistance_codes_enhanced(test_part)
-        target_ohm = parser.convert_to_ohm(test_value)
+        # Sidebar configuration
+        st.sidebar.header("Configuration")
         
-        st.sidebar.markdown("**Test Results:**")
-        if results:
-            best_match = parser.find_best_match(results, target_ohm)
-            for result in results:
-                st.sidebar.write(f"- {result['pattern']}: {result['value']:.2f} Ohm")
-            if best_match:
-                st.sidebar.success(f"Best match: {best_match['pattern']} -> {best_match['value']:.2f} Ohm")
-            else:
-                st.sidebar.warning("No good match found")
-        else:
-            st.sidebar.error("No patterns found")
-
-    # Main content area
-    if uploaded_file is not None:
-        try:
-            # Load data
-            with st.spinner("Loading file..."):
-                df = pd.read_excel(uploaded_file)
+        # File upload
+        uploaded_file = st.file_uploader(
+            "Choose an Excel file",
+            type=['xlsx', 'xls'],
+            help="Upload an Excel file containing part numbers and resistance values"
+        )
+    
+        # Processing settings
+        st.sidebar.subheader("Processing Settings")
+        batch_size = st.sidebar.slider("Batch Size", 100, 10000, 1000, 100)
+        
+        # Pattern testing section
+        st.sidebar.subheader("Pattern Testing")
+        test_part = st.sidebar.text_input("Test Part Number", "AF0603FR-0782KL")
+        test_value = st.sidebar.text_input("Expected Value", "82 Kohm")
+        
+        if st.sidebar.button("Test Pattern"):
+            parser = EnhancedResistanceParser()
+            results = parser.parse_all_resistance_codes_enhanced(test_part)
+            target_ohm = parser.convert_to_ohm(test_value)
             
-            st.success(f"File loaded successfully! {len(df):,} rows found")
-            
-            # Display file info
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Rows", f"{len(df):,}")
-            with col2:
-                st.metric("Columns", len(df.columns))
-            with col3:
-                if 'PartNumber' in df.columns:
-                    st.metric("Part Numbers", f"{df['PartNumber'].notna().sum():,}")
+            st.sidebar.markdown("**Test Results:**")
+            if results:
+                best_match = parser.find_best_match(results, target_ohm)
+                for result in results:
+                    st.sidebar.write(f"- {result['pattern']}: {result['value']:.2f} Ohm")
+                if best_match:
+                    st.sidebar.success(f"Best match: {best_match['pattern']} -> {best_match['value']:.2f} Ohm")
                 else:
-                    st.error("PartNumber column not found!")
-
-            # Show data preview
-            st.subheader("Data Preview")
-            st.dataframe(df.head(10), use_container_width=True)
-
-            # Processing section
-            st.subheader("Processing")
-            
-            if st.button("Start Processing", type="primary"):
-                if 'PartNumber' not in df.columns:
-                    st.error("Required column 'PartNumber' not found in the file!")
-                    return
-
-                # Initialize parser
-                parser = EnhancedResistanceParser(batch_size=batch_size)
+                    st.sidebar.warning("No good match found")
+            else:
+                st.sidebar.error("No patterns found")
+    
+        # Main content area
+        if uploaded_file is not None:
+            try:
+                # Load data
+                with st.spinner("Loading file..."):
+                    df = pd.read_excel(uploaded_file)
                 
-                # Progress tracking
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+                st.success(f"File loaded successfully! {len(df):,} rows found")
                 
-                def update_progress(processed, total):
-                    progress = processed / total
-                    progress_bar.progress(progress)
-                    status_text.text(f"Processing: {processed:,}/{total:,} rows ({progress*100:.1f}%)")
-
-                # Process data
-                start_time = time.time()
-                with st.spinner("Processing resistance codes..."):
-                    matched_results, no_match_results = parser.process_dataframe(df, update_progress)
-
-                processing_time = time.time() - start_time
-                
-                # Display results
-                st.success(f"Processing completed in {processing_time:.2f} seconds!")
-                
-                # Statistics
-                total_processed = len(matched_results) + len(no_match_results)
-                match_rate = (len(matched_results) / total_processed * 100) if total_processed > 0 else 0
-                
-                col1, col2, col3, col4 = st.columns(4)
+                # Display file info
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Total Processed", f"{total_processed:,}")
+                    st.metric("Total Rows", f"{len(df):,}")
                 with col2:
-                    st.metric("Matched", f"{len(matched_results):,}")
+                    st.metric("Columns", len(df.columns))
                 with col3:
-                    st.metric("No Match", f"{len(no_match_results):,}")
-                with col4:
-                    st.metric("Match Rate", f"{match_rate:.1f}%")
-
-                # Results tabs
-                tab1, tab2, tab3 = st.tabs(["Matched Results", "No Match Results", "Download Files"])
+                    if 'PartNumber' in df.columns:
+                        st.metric("Part Numbers", f"{df['PartNumber'].notna().sum():,}")
+                    else:
+                        st.error("PartNumber column not found!")
+    
+                # Show data preview
+                st.subheader("Data Preview")
+                st.dataframe(df.head(10), use_container_width=True)
+    
+                # Processing section
+                st.subheader("Processing")
                 
-                with tab1:
-                    if matched_results:
-                        df_matched = pd.DataFrame(matched_results)
-                        st.subheader(f"Matched Results ({len(matched_results):,} rows)")
-                        st.dataframe(df_matched, use_container_width=True)
-                        
-                        # Download button for matched results
-                        buffer = BytesIO()
-                        df_matched.to_excel(buffer, index=False)
-                        st.download_button(
-                            label="Download Matched Results (Excel)",
-                            data=buffer.getvalue(),
-                            file_name="extracted_resistances_MATCH.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    else:
-                        st.info("No matched results found")
-
-                with tab2:
-                    if no_match_results:
-                        df_no_match = pd.DataFrame(no_match_results)
-                        st.subheader(f"No Match Results ({len(no_match_results):,} rows)")
-                        st.dataframe(df_no_match, use_container_width=True)
-                        
-                        # Download button for no-match results
-                        buffer = BytesIO()
-                        df_no_match.to_excel(buffer, index=False)
-                        st.download_button(
-                            label="Download No Match Results (Excel)",
-                            data=buffer.getvalue(),
-                            file_name="extracted_resistances_NotMATCH.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    else:
-                        st.info("No unmatched results found")
-
-                with tab3:
-                    st.subheader("Download All Results")
+                if st.button("Start Processing", type="primary"):
+                    if 'PartNumber' not in df.columns:
+                        st.error("Required column 'PartNumber' not found in the file!")
+                        return
+    
+                    # Initialize parser
+                    parser = EnhancedResistanceParser(batch_size=batch_size)
                     
-                    # Create combined results
-                    all_results = matched_results + no_match_results
-                    if all_results:
-                        df_all = pd.DataFrame(all_results)
-                        
-                        # Single combined file
-                        buffer_all = BytesIO()
-                        df_all.to_excel(buffer_all, index=False)
-                        st.download_button(
-                            label="Download All Results (Excel)",
-                            data=buffer_all.getvalue(),
-                            file_name="extracted_resistances_ALL.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                        
-                        # ZIP file with separate files
-                        zip_buffer = BytesIO()
-                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                            if matched_results:
-                                matched_buffer = BytesIO()
-                                pd.DataFrame(matched_results).to_excel(matched_buffer, index=False)
-                                zip_file.writestr("extracted_resistances_MATCH.xlsx", matched_buffer.getvalue())
+                    # Progress tracking
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    def update_progress(processed, total):
+                        progress = processed / total
+                        progress_bar.progress(progress)
+                        status_text.text(f"Processing: {processed:,}/{total:,} rows ({progress*100:.1f}%)")
+    
+                    # Process data
+                    start_time = time.time()
+                    with st.spinner("Processing resistance codes..."):
+                        matched_results, no_match_results = parser.process_dataframe(df, update_progress)
+    
+                    processing_time = time.time() - start_time
+                    
+                    # Display results
+                    st.success(f"Processing completed in {processing_time:.2f} seconds!")
+                    
+                    # Statistics
+                    total_processed = len(matched_results) + len(no_match_results)
+                    match_rate = (len(matched_results) / total_processed * 100) if total_processed > 0 else 0
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Total Processed", f"{total_processed:,}")
+                    with col2:
+                        st.metric("Matched", f"{len(matched_results):,}")
+                    with col3:
+                        st.metric("No Match", f"{len(no_match_results):,}")
+                    with col4:
+                        st.metric("Match Rate", f"{match_rate:.1f}%")
+    
+                    # Results tabs
+                    tab1, tab2, tab3 = st.tabs(["Matched Results", "No Match Results", "Download Files"])
+                    
+                    with tab1:
+                        if matched_results:
+                            df_matched = pd.DataFrame(matched_results)
+                            st.subheader(f"Matched Results ({len(matched_results):,} rows)")
+                            st.dataframe(df_matched, use_container_width=True)
                             
-                            if no_match_results:
-                                no_match_buffer = BytesIO()
-                                pd.DataFrame(no_match_results).to_excel(no_match_buffer, index=False)
-                                zip_file.writestr("extracted_resistances_NotMATCH.xlsx", no_match_buffer.getvalue())
+                            # Download button for matched results
+                            buffer = BytesIO()
+                            df_matched.to_excel(buffer, index=False)
+                            st.download_button(
+                                label="Download Matched Results (Excel)",
+                                data=buffer.getvalue(),
+                                file_name="extracted_resistances_MATCH.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                        else:
+                            st.info("No matched results found")
+    
+                    with tab2:
+                        if no_match_results:
+                            df_no_match = pd.DataFrame(no_match_results)
+                            st.subheader(f"No Match Results ({len(no_match_results):,} rows)")
+                            st.dataframe(df_no_match, use_container_width=True)
                             
-                            # Add summary
-                            summary = {
-                                'processing_completed': datetime.now().isoformat(),
-                                'total_processed_rows': total_processed,
-                                'matched_count': len(matched_results),
-                                'no_match_count': len(no_match_results),
-                                'match_rate_percent': match_rate
-                            }
-                            zip_file.writestr("processing_summary.json", json.dumps(summary, indent=2))
+                            # Download button for no-match results
+                            buffer = BytesIO()
+                            df_no_match.to_excel(buffer, index=False)
+                            st.download_button(
+                                label="Download No Match Results (Excel)",
+                                data=buffer.getvalue(),
+                                file_name="extracted_resistances_NotMATCH.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                        else:
+                            st.info("No unmatched results found")
+    
+                    with tab3:
+                        st.subheader("Download All Results")
                         
-                        st.download_button(
-                            label="Download ZIP Package (All Files)",
-                            data=zip_buffer.getvalue(),
-                            file_name="resistance_parser_results.zip",
-                            mime="application/zip"
-                        )
+                        # Create combined results
+                        all_results = matched_results + no_match_results
+                        if all_results:
+                            df_all = pd.DataFrame(all_results)
+                            
+                            # Single combined file
+                            buffer_all = BytesIO()
+                            df_all.to_excel(buffer_all, index=False)
+                            st.download_button(
+                                label="Download All Results (Excel)",
+                                data=buffer_all.getvalue(),
+                                file_name="extracted_resistances_ALL.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                            
+                            # ZIP file with separate files
+                            zip_buffer = BytesIO()
+                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                if matched_results:
+                                    matched_buffer = BytesIO()
+                                    pd.DataFrame(matched_results).to_excel(matched_buffer, index=False)
+                                    zip_file.writestr("extracted_resistances_MATCH.xlsx", matched_buffer.getvalue())
+                                
+                                if no_match_results:
+                                    no_match_buffer = BytesIO()
+                                    pd.DataFrame(no_match_results).to_excel(no_match_buffer, index=False)
+                                    zip_file.writestr("extracted_resistances_NotMATCH.xlsx", no_match_buffer.getvalue())
+                                
+                                # Add summary
+                                summary = {
+                                    'processing_completed': datetime.now().isoformat(),
+                                    'total_processed_rows': total_processed,
+                                    'matched_count': len(matched_results),
+                                    'no_match_count': len(no_match_results),
+                                    'match_rate_percent': match_rate
+                                }
+                                zip_file.writestr("processing_summary.json", json.dumps(summary, indent=2))
+                            
+                            st.download_button(
+                                label="Download ZIP Package (All Files)",
+                                data=zip_buffer.getvalue(),
+                                file_name="resistance_parser_results.zip",
+                                mime="application/zip"
+                            )
+    
+            except Exception as e:
+                st.error(f"Error loading file: {str(e)}")
+                st.info("Please ensure the file is a valid Excel file with the required columns")
+    
+        else:
+            # Instructions when no file is uploaded
+            st.info("Please upload an Excel file to begin processing")
+            
+            st.subheader("Expected File Format")
+            st.markdown("""
+            Your Excel file should contain the following columns:
+            - **PartNumber** (required): Part numbers containing resistance codes
+            - **Value** (optional): Expected resistance values (e.g., "82 Kohm", "47 mOhm")
+            - **CompanyName** (optional): Company information
+            - **ProductLine** (optional): Product line information
+            - **FeatureName** (optional): Feature information
+            """)
+    
+            st.subheader("Supported Patterns")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("""
+                **Multiplier Decimal Patterns:**
+                - `82K` → 82,000 Ohm
+                - `3K3` → 3,300 Ohm
+                - `2M20` → 2,200,000 Ohm
+                - `47K5` → 47,500 Ohm
+                
+                **R-Decimal Patterns:**
+                - `R047` → 0.047 Ohm
+                - `47R0` → 47.0 Ohm
+                - `4R7` → 4.7 Ohm
+                """)
+            
+            with col2:
+                st.markdown("""
+                **Traditional Patterns:**
+                - `472` → 4,700 Ohm (47 × 10²)
+                - `1003` → 100,000 Ohm (100 × 10³)
+                
+                **4-Digit Rules:**
+                - Rule 1: Character multipliers (J, K, L, M, N, P)
+                - Rule 2: Character as decimal point replacement
+                """)
 
-        except Exception as e:
-            st.error(f"Error loading file: {str(e)}")
-            st.info("Please ensure the file is a valid Excel file with the required columns")
+    # Footer
+    st.markdown("---")
+    st.markdown("**Enhanced Resistance Code Parser** - Extracts resistance values from part numbers using multiple parsing rules")
 
-    else:
-        # Instructions when no file is uploaded
-        st.info("Please upload an Excel file to begin processing, or download the template to get started")
-        
-        # Prominent template download in main area
-        # st.subheader("📥
+
+if __name__ == "__main__":
+    main()
