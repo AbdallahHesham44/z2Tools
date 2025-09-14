@@ -487,11 +487,11 @@ def main():
 
         # Create a template dataframe
         template_data = {
-            "PartNumber": ["AF0603FR-0782KL", "CRCW040210K0FKED"],
-            "Value": ["82 Kohm", "10 Kohm"],
-            "CompanyName": ["Yageo", "Vishay"],
-            "ProductLine": ["Resistors", "Resistors"],
-            "FeatureName": ["Thick Film", "Thin Film"]
+            "PartNumber": [" "],
+            "Value": [" "],
+            "CompanyName": [" "],
+            "ProductLine": [" "],
+            "FeatureName": [" "]
         }
         df_template = pd.DataFrame(template_data)
 
