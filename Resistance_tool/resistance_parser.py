@@ -478,12 +478,7 @@ class EnhancedResistanceParser:
 
 
 def main():
-    tab_main, tab_template = st.tabs(["Parser Tool", "📥 Download Template"])
-    with tab_template:
-        st.title("⚡ Enhanced Resistance Code Parser")
-        st.markdown("Upload an Excel file with resistance part numbers to extract and match resistance values")
-    
-        # Tabs for navigation
+   
         tab_main, tab_template = st.tabs(["Parser Tool", "📥 Download Template"])
     
         with tab_template:
