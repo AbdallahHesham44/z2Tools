@@ -376,8 +376,13 @@ with tab_template:
     # Example template
     template_df = pd.DataFrame({
         "PartNumber": ["ABC123", "XYZ456", "Cap-10uF-25V"],
-        "Capacitance": ["10uF", "22uF", "47uF"],
-        "Voltage": ["25V", "50V", "16V"]
+        "CompanyName": ["Kemet Corporation","Vishay Vitramon"],
+        "ProductLine": [],
+        "FeatureName":[],
+        "Value":  ["10uF", "22uF", "47uF"],
+        
+        				
+
     })
 
     import io
