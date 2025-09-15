@@ -210,18 +210,16 @@ def create_template_file():
         'ZPartNumber': ['CF1/4CT52RR51J', 'ABC123XYZ', 'DEF456GHI'],
         'FamilyName': ['SampleFamily1', 'SampleFamily2', 'SampleFamily1'],
         'Part Mask': ['CF1/4CT52____51J', 'ABC123___', 'DEF456___'],
-        'masked_code': ['', '', ''],
-        'maskMatch': ['', '', ''],
-        'PortionStart': ['', '', '']
+        'masked_code': ['OUTPUT', 'OUTPUT', 'OUTPUT'],
+        'maskMatch': ['OUTPUT', 'OUTPUT', 'OUTPUT'],
+        'PortionStart': ['OUTPUT', 'OUTPUT', 'OUTPUT']
     }
     
     b2_data = {
         'ZPartNumber': ['CF1/4CT52RR51J', 'ABC123XYZ', 'DEF456GHI'],
         'FamilyName': ['SampleFamily1', 'SampleFamily2', 'SampleFamily1'],
         'Part Mask': ['CF1/4CT52____51J', 'ABC123___', 'DEF456___'],
-        'masked_code': ['', '', ''],
-        'maskMatch': ['', '', ''],
-        'PortionStart': ['', '', '']
+        
     }
     
     # Create DataFrames
