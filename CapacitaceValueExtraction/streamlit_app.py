@@ -375,11 +375,11 @@ with tab_template:
 
     # Example template
     template_df = pd.DataFrame({
-        "PartNumber": ["ABC123", "XYZ456", "Cap-10uF-25V"],
+        "PartNumber": ["ABC123", "XYZ456"],
         "CompanyName": ["Kemet Corporation","Vishay Vitramon"],
-        "ProductLine": [""],
-        "FeatureName":[""],
-        "Value":  ["10uF", "22uF", "47uF"]    
+        "ProductLine": ["Ceramic Capacitors","Ceramic Capacitors"],
+        "FeatureName":["Capacitance","Capacitance"],
+        "Value":  ["10uF", "22uF"]    
         				
 
     })
