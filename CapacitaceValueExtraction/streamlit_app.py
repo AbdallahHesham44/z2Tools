@@ -379,8 +379,7 @@ with tab_template:
         "CompanyName": ["Kemet Corporation","Vishay Vitramon"],
         "ProductLine": [],
         "FeatureName":[],
-        "Value":  ["10uF", "22uF", "47uF"],
-        
+        "Value":  ["10uF", "22uF", "47uF"]    
         				
 
     })
