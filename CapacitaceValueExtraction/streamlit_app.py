@@ -68,7 +68,7 @@ with st.sidebar:
 st.header("📁 Upload File")
 
 # File size warning
-st.error("⚠️ **IMPORTANT for 1GB RAM**: Files over 50MB may fail. Consider splitting large files into smaller chunks.")
+st.error("⚠️ **IMPORTANT for 1GB RAM**: Files over 50MB may fail. Consider splitting large files into smaller chunks. \n Use this Tool https://z2tools-splite-excelfile.streamlit.app/")
 
 uploaded_file = st.file_uploader(
     "Upload Excel File", 
