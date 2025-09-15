@@ -377,8 +377,8 @@ with tab_template:
     template_df = pd.DataFrame({
         "PartNumber": ["ABC123", "XYZ456", "Cap-10uF-25V"],
         "CompanyName": ["Kemet Corporation","Vishay Vitramon"],
-        "ProductLine": [],
-        "FeatureName":[],
+        "ProductLine": [""],
+        "FeatureName":[""],
         "Value":  ["10uF", "22uF", "47uF"]    
         				
 
