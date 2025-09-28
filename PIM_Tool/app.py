@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import pandas as pd
 import re
@@ -121,4 +121,4 @@ if uploaded_file:
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         df_marked.to_excel(writer, index=False, sheet_name="Processed")
     st.download_button("⬇️ Download Processed Excel", data=output.getvalue(), file_name="processed_output.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-```
+
