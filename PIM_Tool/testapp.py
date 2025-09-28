@@ -1,61 +1,39 @@
-
-
-
 import streamlit as st
 import pandas as pd
 import re
+import tempfile
+import os
 from rapidfuzz import fuzz
 import numpy as np
 import requests
 from io import BytesIO
-import tempfile
-import os
 
-# Google Drive URLs for the reference files (replace with your actual Google Drive file IDs)
+# Google Drive URLs for the reference files
 DRIVE_FILES = {
-    "pattern_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true",
-    "preset_file": "https://docs.google.com/spreadsheets/d/1jXQvc7g7juMts5TNyXwGfBIrny_FPR6i/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true"
+    "pattern_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/export?format=xlsx",
+    "preset_file": "https://docs.google.com/spreadsheets/d/1jXQvc7g7juMts5TNyXwGfBIrny_FPR6i/export?format=xlsx"
 }
 
-def get_drive_download_url(file_id):
-    """Convert Google Drive file ID to direct download URL"""
-    return f"https://drive.google.com/uc?id={file_id}&export=download"
+def download_file_from_drive(url):
+    """Download file from Google Drive URL"""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return BytesIO(response.content)
+    except Exception as e:
+        st.error(f"Error downloading file: {str(e)}")
+        return None
 
 @st.cache_data
-def download_drive_file(file_id):
-    """Download file from Google Drive and return as BytesIO object"""
-    try:
-        url = get_drive_download_url(file_id)
-        
-        # First request to get the confirmation token for large files
-        response = requests.get(url, stream=True)
-        
-        # Check if we need to handle the virus scan warning
-        if 'download_warning' in response.cookies:
-            # Get the confirmation token
-            token = None
-            for key, value in response.cookies.items():
-                if key.startswith('download_warning'):
-                    token = value
-                    break
-            
-            # Make second request with confirmation token
-            if token:
-                params = {'id': file_id, 'export': 'download', 'confirm': token}
-                response = requests.get('https://drive.google.com/uc', params=params, stream=True)
-        
-        response.raise_for_status()
-        
-        # Check if response is HTML (means sharing is restricted)
-        content_type = response.headers.get('content-type', '')
-        if 'text/html' in content_type:
-            raise Exception("File is not publicly accessible. Please check sharing permissions.")
-        
-        return BytesIO(response.content)
-        
-    except Exception as e:
-        st.error(f"Error downloading file from Google Drive: {e}")
-        return None
+def load_reference_files():
+    """Load reference files from Google Drive"""
+    pattern_file = download_file_from_drive(DRIVE_FILES["pattern_file"])
+    preset_file = download_file_from_drive(DRIVE_FILES["preset_file"])
+    
+    if pattern_file is None or preset_file is None:
+        return None, None
+    
+    return pattern_file, preset_file
 
 def make_pattern(text):
     def replacer(match):
@@ -71,11 +49,8 @@ def make_pattern(text):
 
     return re.sub(r"(\d+)(?:\.(\d+))?", replacer, text)
 
-def process_excel_data(df):
-    """Process the uploaded Excel data"""
-    # Convert to string type
-    df = df.astype(str)
-    
+def process_excel(df):
+    """Process the uploaded DataFrame"""
     # Create a key column
     df["key"] = (
         df["Category"].astype(str) + "|" +
@@ -96,7 +71,7 @@ def process_excel_data(df):
     return df
 
 def sort_preset_values(df):
-    """Sort preset values intelligently"""
+    """Sort preset values within the DataFrame"""
     def is_alpha_only(s):
         """Check if value is alphabetic only (ignoring spaces)."""
         return bool(re.fullmatch(r"[A-Za-z\s]+", s))
@@ -113,7 +88,7 @@ def sort_preset_values(df):
             if ", " in grp:  
                 parts = [p.strip() for p in grp.split(",")]
 
-                # Only sort if all items are alphabetic
+                # ✅ Only sort if all items are alphabetic
                 if all(is_alpha_only(p) for p in parts):
                     parts_sorted = sorted(parts, key=lambda x: x.lower())
                     sorted_groups.append(", ".join(parts_sorted))
@@ -132,6 +107,18 @@ def sort_preset_values(df):
 
     return df
 
+def normalize_case(s: str) -> str:
+    """Remove nothing, just lowercase for case sensitivity check"""
+    return s.lower()
+
+def normalize_alpha(s: str) -> str:
+    """Keep only alphabetic characters"""
+    return re.sub(r'[^a-zA-Z]+', '', s).lower()
+
+def normalize_alnum(s: str) -> str:
+    """Keep alphanumeric, drop spaces/specials"""
+    return re.sub(r'[^a-zA-Z0-9]+', '', s).lower()
+
 def normalize_pattern(s: str) -> str:
     """Normalize patterns by removing spaces and unifying special chars"""
     if not isinstance(s, str):
@@ -142,7 +129,7 @@ def normalize_pattern(s: str) -> str:
     return s.lower()            # case-insensitive
 
 def mark_patterns(df1, df2):
-    """Mark patterns as numbers or not"""
+    """Mark patterns in the DataFrame"""
     # Normalize both
     df1["pattern_norm"] = df1["Helper_pattern"].apply(normalize_pattern)
     df2["Pattern_norm"] = df2["Pattern"].apply(normalize_pattern)
@@ -158,20 +145,8 @@ def mark_patterns(df1, df2):
 
     return df1
 
-def normalize_case(s: str) -> str:
-    """Remove nothing, just lowercase for case sensitivity check"""
-    return s.lower()
-
-def normalize_alpha(s: str) -> str:
-    """Keep only alphabetic characters"""
-    return re.sub(r'[^a-zA-Z]+', '', s).lower()
-
-def normalize_alnum(s: str) -> str:
-    """Keep alphanumeric, drop spaces/specials"""
-    return re.sub(r'[^a-zA-Z0-9]+', '', s).lower()
-
 def extract_numbers_by_pattern(value: str, pattern: str):
-    """Extract numbers from value based on Helper_pattern"""
+    """Extract numbers from value based on Helper_pattern (supports $, ±, etc.)."""
     if not isinstance(value, str) or not isinstance(pattern, str):
         return []
 
@@ -179,7 +154,7 @@ def extract_numbers_by_pattern(value: str, pattern: str):
     match = re.match(regex_pattern, value.strip())
     if not match:
         return []
-    return [float(x) for x in match.groups() if x]
+    return [float(x) for x in match.groups() if x]  # only valid numbers
 
 def compare_two_numbers(numA, numB):
     """Compare two lists of numbers and return division and percentage strings"""
@@ -214,7 +189,7 @@ def calc_worst_percentage(perc_str):
         return ""
     return min(nums)
 
-def determine_comment(is_number, per_value1, per_value2_nospecial, perc_num1_worst, perc_num2_worst, comment_value1, is_caseSensetive='False'):
+def determine_comment(is_number, per_value1, per_value2_nospecial, perc_num1_worst, perc_num2_worst, comment_value1, is_caseSensitive=False):
     """Determine the Comment based on business rules"""
     if comment_value1 == "no match found":
         return "Category not found"
@@ -231,7 +206,7 @@ def determine_comment(is_number, per_value1, per_value2_nospecial, perc_num1_wor
             return "Not Found Number"
     else:
         # IsNumber = No rules
-        if per_value1 == 100 and per_value2_nospecial == 100 and is_caseSensetive:
+        if per_value1 == 100 and per_value2_nospecial == 100 and is_caseSensitive:
             return "Found Exact String with caseSensitive"
         elif per_value1 == 100 and per_value2_nospecial == 100:
             return "Found Exact String"
@@ -305,13 +280,14 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2):
             main_val2 = str(cand["Preset values"])
             val2 = str(cand["Preset values"]).lower()
 
-            is_caseSensetive = row.get("isCaseSensetive", "").strip().lower() == "yes"
+            is_caseSensitive = row.get("isCaseSensitive", "").strip().lower() == "yes"
             
-            if is_caseSensetive:
+            # if flag is yes True
+            if is_caseSensitive:
                 sim = fuzz.ratio(val1.lower(), val2)
             else:
                 sim = fuzz.ratio(val1, main_val2)
-            
+                
             sim_noSpecial = fuzz.ratio(normalize_alnum(val1), normalize_alnum(val2))
 
             sims.append({
@@ -349,7 +325,7 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2):
                 "Value1": best_val,
                 "per_Value1": best_score,
                 "Comment_Value1": comment,
-                "Value2_noSpecial": best_val,
+                "Value2_noSpecial": best_val,   # same candidate
                 "per_Value2_noSpecial": best_score_noSpecial,
                 "MatchRank": rank,
                 "valueHelper_pattern": helper_pattern_val,
@@ -361,20 +337,24 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2):
             if is_number:
                 pat_preset = row.get("Helper_pattern", "")
 
+                # Initialize number comparison variables
                 value_num1, perc_num1 = "", ""
                 value_num2, perc_num2 = "", ""
 
+                # Compare preset vs Value1 (same pattern)
                 if pat_preset == helper_pattern_val:
                     nums_base = extract_numbers_by_pattern(val1, pat_preset)
                     nums1 = extract_numbers_by_pattern(best_val, helper_pattern_val)
                     if nums_base and nums1 and len(nums_base) == len(nums1):
                         value_num1, perc_num1 = compare_two_numbers(nums_base, nums1)
 
+                # Compare preset vs Value2_noSpecial (same pattern)
                 if pat_preset == helper_pattern_val:
                     nums2 = extract_numbers_by_pattern(best_val, helper_pattern_val)
                     if nums_base and nums2 and len(nums_base) == len(nums2):
                         value_num2, perc_num2 = compare_two_numbers(nums_base, nums2)
 
+                # Calculate overall and worst percentages
                 perc1_overall = calc_overall_percentage(perc_num1)
                 perc2_overall = calc_overall_percentage(perc_num2)
                 perc1_worst = calc_worst_percentage(perc_num1)
@@ -391,6 +371,7 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2):
                     "percentageNumber_Value2_worst": perc2_worst if perc2_worst != "" else 0,
                 })
             else:
+                # For non-number cases, set worst percentages to 0
                 base_update.update({
                     "percentageNumber_Value1_worst": 0,
                     "percentageNumber_Value2_worst": 0,
@@ -399,6 +380,7 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2):
             # Determine comment based on business rules
             perc1_worst_val = base_update.get("percentageNumber_Value1_worst", 0) if is_number else None
             perc2_worst_val = base_update.get("percentageNumber_Value2_worst", 0) if is_number else None
+            is_caseSensitive = row.get("isCaseSensitive", "").strip().lower() == "yes"
 
             comment = determine_comment(
                 is_number,
@@ -407,7 +389,7 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2):
                 perc1_worst_val,
                 perc2_worst_val,
                 comment,
-                row.get("isCaseSensetive", "").strip().lower() == "yes"
+                is_caseSensitive
             )
             base_update["Comment"] = comment
 
@@ -415,43 +397,39 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2):
             results.append(row_out)
 
     df_out = pd.DataFrame(results)
+
+    # Define sort columns based on whether number comparison was performed
+    if any(row.get("IsNumber", "").strip().lower() == "yes" for _, row in df1.iterrows()):
+        sort_cols = [
+            "per_Value1",
+            "per_Value2_noSpecial",
+            "percentageNumber_Value1_worst",
+            "percentageNumber_Value2_worst"
+        ]
+        # Only sort by number columns if they exist
+        existing_cols = [col for col in sort_cols if col in df_out.columns]
+        if len(existing_cols) > 2:  # If we have number columns
+            df_out = df_out.sort_values(by=existing_cols, ascending=[False]*len(existing_cols))
+
     return df_out
 
-# Streamlit App
 def main():
-    st.set_page_config(page_title="Excel Pattern Matcher", layout="wide")
+    st.set_page_config(
+        page_title="Data Processing App",
+        page_icon="📊",
+        layout="wide"
+    )
     
-    st.title("🔍 Excel Pattern Matcher")
-    st.markdown("Upload your Excel file and compare it against reference patterns from GitHub.")
+    st.title("📊 Data Processing and Comparison Tool")
+    st.markdown("Upload your Excel file and let the system process it against reference data from Google Drive.")
     
     # Sidebar for parameters
-    st.sidebar.header("Parameters")
+    st.sidebar.header("⚙️ Parameters")
     threshold = st.sidebar.slider("Similarity Threshold", 0, 100, 50, help="Minimum similarity score for matches")
-    top_n = st.sidebar.selectbox("Top N Matches", [1, 2, 3, 4, 5], index=0, help="Number of top matches to return")
-    
-    # Google Drive File IDs input
-    st.sidebar.header("Google Drive File IDs")
-    st.sidebar.markdown("""
-    **How to get Google Drive File ID:**
-    1. Open the file in Google Drive
-    2. Click Share → Anyone with the link
-    3. Copy the link: `https://drive.google.com/file/d/FILE_ID/view`
-    4. Extract the FILE_ID part
-    """)
-    
-    pattern_file_id = st.sidebar.text_input(
-        "Pattern File ID",
-        value=DRIVE_FILES["pattern_file"],
-        help="Google Drive File ID for the pattern reference file"
-    )
-    preset_file_id = st.sidebar.text_input(
-        "Preset File ID", 
-        value=DRIVE_FILES["preset_file"],
-        help="Google Drive File ID for the preset reference file"
-    )
+    top_n = st.sidebar.selectbox("Top N Matches", [1, 2, 3, 4, 5], index=0, help="Number of top matches to consider")
     
     # File upload
-    st.header("📁 Upload Your Excel File")
+    st.header("📁 File Upload")
     uploaded_file = st.file_uploader(
         "Choose an Excel file",
         type=['xlsx', 'xls'],
@@ -462,66 +440,50 @@ def main():
         try:
             # Load uploaded file
             with st.spinner("Loading uploaded file..."):
-                df_input = pd.read_excel(uploaded_file, dtype=str)
+                df_uploaded = pd.read_excel(uploaded_file, dtype=str)
             
-            st.success(f"✅ Uploaded file loaded successfully! Shape: {df_input.shape}")
+            st.success(f"✅ Uploaded file loaded successfully! ({len(df_uploaded)} rows)")
             
-            # Show preview of uploaded file
-            with st.expander("📊 Preview of Uploaded File", expanded=True):
-                st.dataframe(df_input.head(10))
+            # Show preview of uploaded data
+            with st.expander("📋 Preview of Uploaded Data"):
+                st.dataframe(df_uploaded.head(), use_container_width=True)
             
-            # Download GitHub files
-            st.header("📥 Loading Reference Files from GitHub")
+            # Load reference files from Google Drive
+            st.header("🔄 Processing Data")
+            with st.spinner("Loading reference files from Google Drive..."):
+                pattern_file, preset_file = load_reference_files()
             
-            col1, col2 = st.columns(2)
+            if pattern_file is None or preset_file is None:
+                st.error("❌ Failed to load reference files from Google Drive. Please check the URLs.")
+                return
             
-            with col1:
-                with st.spinner("Downloading pattern file..."):
-                    pattern_file_data = download_github_file(pattern_url)
-                if pattern_file_data:
-                    df_pattern = pd.read_excel(pattern_file_data, dtype=str)
-                    st.success(f"✅ Pattern file loaded! Shape: {df_pattern.shape}")
-                else:
-                    st.error("❌ Failed to load pattern file from GitHub")
-                    return
-            
-            with col2:
-                with st.spinner("Downloading preset file..."):
-                    preset_file_data = download_github_file(preset_url)
-                if preset_file_data:
-                    df_preset = pd.read_excel(preset_file_data, dtype=str)
-                    st.success(f"✅ Preset file loaded! Shape: {df_preset.shape}")
-                else:
-                    st.error("❌ Failed to load preset file from GitHub")
-                    return
-            
-            # Process button
-            if st.button("🚀 Process Files", type="primary"):
-                with st.spinner("Processing files..."):
-                    # Step 1: Process uploaded file
-                    st.info("Step 1: Processing uploaded file...")
-                    df_processed = process_excel_data(df_input)
+            try:
+                df_pattern = pd.read_excel(pattern_file, dtype=str)
+                df_preset = pd.read_excel(preset_file, dtype=str)
+                st.success("✅ Reference files loaded successfully!")
+                
+                # Process the data
+                with st.spinner("Processing your data..."):
+                    # Step 1: Process Excel
+                    df_processed = process_excel(df_uploaded.copy())
                     
                     # Step 2: Sort preset values
-                    st.info("Step 2: Sorting preset values...")
                     df_sorted = sort_preset_values(df_processed)
                     
                     # Step 3: Mark patterns
-                    st.info("Step 3: Marking patterns...")
                     df_marked = mark_patterns(df_sorted, df_pattern)
                     
                     # Step 4: Compare files
-                    st.info("Step 4: Comparing files...")
                     df_result = compare_files_with_conditional_numbers(
-                        df_marked, df_preset, threshold=threshold, top_n=top_n
+                        df_marked, df_preset, threshold, top_n
                     )
                 
-                st.success("✅ Processing completed!")
+                st.success("🎉 Processing completed successfully!")
                 
                 # Display results
                 st.header("📊 Results")
                 
-                # Summary statistics
+                # Show summary statistics
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Total Rows", len(df_result))
@@ -529,74 +491,86 @@ def main():
                     exact_matches = len(df_result[df_result['Comment'].str.contains('Found Exact', na=False)])
                     st.metric("Exact Matches", exact_matches)
                 with col3:
-                    no_matches = len(df_result[df_result['Comment'].str.contains('Not Found', na=False)])
-                    st.metric("No Matches", no_matches)
+                    number_matches = len(df_result[df_result['IsNumber'] == 'Yes'])
+                    st.metric("Number Patterns", number_matches)
                 with col4:
-                    similarity_matches = len(df_result[df_result['Comment'].str.contains('Similar', na=False)])
-                    st.metric("Similar Matches", similarity_matches)
+                    no_matches = len(df_result[df_result['Comment'] == 'Category not found'])
+                    st.metric("No Matches", no_matches)
                 
-                # Results table
+                # Show full results
                 with st.expander("📋 Full Results", expanded=True):
                     st.dataframe(df_result, use_container_width=True)
                 
+                # Create summary for download
+                summary_cols = ["Category", "Sub-Category", "Attribute Name",
+                               "Preset values", "Max Value", "Unit", "key",
+                               "Value1", "Comment"]
+                existing_summary_cols = [c for c in summary_cols if c in df_result.columns]
+                df_summary = df_result[existing_summary_cols].copy()
+                
                 # Download buttons
                 st.header("💾 Download Results")
-                
                 col1, col2 = st.columns(2)
                 
                 with col1:
                     # Full results download
-                    full_csv = df_result.to_csv(index=False).encode('utf-8')
+                    output_buffer = BytesIO()
+                    df_result.to_excel(output_buffer, index=False, engine='openpyxl')
+                    output_buffer.seek(0)
+                    
                     st.download_button(
-                        label="📄 Download Full Results (CSV)",
-                        data=full_csv,
-                        file_name='pattern_matching_results.csv',
-                        mime='text/csv'
+                        label="📥 Download Full Results",
+                        data=output_buffer.getvalue(),
+                        file_name=f"processed_results_{uploaded_file.name}",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                 
                 with col2:
-                    # Summary results download
-                    summary_cols = ["Category", "Sub-Category", "Attribute Name",
-                                  "Preset values", "Max Value", "Unit", "key",
-                                  "Value1", "Comment"]
-                    existing_summary_cols = [c for c in summary_cols if c in df_result.columns]
-                    df_summary = df_result[existing_summary_cols].copy()
+                    # Summary download
+                    summary_buffer = BytesIO()
+                    df_summary.to_excel(summary_buffer, index=False, engine='openpyxl')
+                    summary_buffer.seek(0)
                     
-                    summary_csv = df_summary.to_csv(index=False).encode('utf-8')
                     st.download_button(
-                        label="📋 Download Summary (CSV)",
-                        data=summary_csv,
-                        file_name='pattern_matching_summary.csv',
-                        mime='text/csv'
+                        label="📥 Download Summary",
+                        data=summary_buffer.getvalue(),
+                        file_name=f"summary_{uploaded_file.name}",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                 
-                # Excel downloads
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-                    df_result.to_excel(tmp.name, index=False)
-                    with open(tmp.name, 'rb') as f:
-                        excel_data = f.read()
+                # Show comment distribution
+                st.header("📈 Analysis")
+                comment_counts = df_result['Comment'].value_counts()
+                if not comment_counts.empty:
+                    st.bar_chart(comment_counts)
                     
-                    st.download_button(
-                        label="📊 Download Full Results (Excel)",
-                        data=excel_data,
-                        file_name='pattern_matching_results.xlsx',
-                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                    )
+                    with st.expander("📊 Comment Distribution Details"):
+                        st.dataframe(
+                            pd.DataFrame({
+                                'Comment': comment_counts.index,
+                                'Count': comment_counts.values,
+                                'Percentage': (comment_counts.values / len(df_result) * 100).round(2)
+                            })
+                        )
+                
+            except Exception as e:
+                st.error(f"❌ Error processing reference files: {str(e)}")
                 
         except Exception as e:
-            st.error(f"❌ An error occurred: {str(e)}")
+            st.error(f"❌ Error reading uploaded file: {str(e)}")
+            st.info("Please make sure your file is a valid Excel file with the required columns.")
     
     else:
         st.info("👆 Please upload an Excel file to get started.")
         
-        # Show example of expected file format
-        st.header("📋 Expected File Format")
+        # Show information about required columns
+        st.header("📋 Required File Format")
         st.markdown("""
         Your Excel file should contain the following columns:
-        - **Category**: Product category
-        - **Sub-Category**: Product sub-category  
+        - **Category**: Main category of the item
+        - **Sub-Category**: Subcategory of the item  
         - **Attribute Name**: Name of the attribute
-        - **Preset values**: Values to be matched
+        - **Preset values**: The values to be processed
         - **Max Value**: Maximum value (if applicable)
         - **Unit**: Unit of measurement (if applicable)
         """)
