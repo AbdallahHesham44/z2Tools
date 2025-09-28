@@ -8,21 +8,50 @@ from io import BytesIO
 import tempfile
 import os
 
-# GitHub URLs for the reference files (replace with your actual GitHub raw URLs)
-GITHUB_FILES = {
-    "pattern_file": "https://raw.githubusercontent.com/yourusername/yourrepo/main/zvaluepatternbystatus_input.xlsx",
-    "preset_file": "https://raw.githubusercontent.com/yourusername/yourrepo/main/Preset_15_pattern-count_new.xlsx"
+# Google Drive URLs for the reference files (replace with your actual Google Drive file IDs)
+DRIVE_FILES = {
+    "pattern_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true",
+    "preset_file": "https://docs.google.com/spreadsheets/d/1jXQvc7g7juMts5TNyXwGfBIrny_FPR6i/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true"
 }
 
+def get_drive_download_url(file_id):
+    """Convert Google Drive file ID to direct download URL"""
+    return f"https://drive.google.com/uc?id={file_id}&export=download"
+
 @st.cache_data
-def download_github_file(url):
-    """Download file from GitHub and return as BytesIO object"""
+def download_drive_file(file_id):
+    """Download file from Google Drive and return as BytesIO object"""
     try:
-        response = requests.get(url)
+        url = get_drive_download_url(file_id)
+        
+        # First request to get the confirmation token for large files
+        response = requests.get(url, stream=True)
+        
+        # Check if we need to handle the virus scan warning
+        if 'download_warning' in response.cookies:
+            # Get the confirmation token
+            token = None
+            for key, value in response.cookies.items():
+                if key.startswith('download_warning'):
+                    token = value
+                    break
+            
+            # Make second request with confirmation token
+            if token:
+                params = {'id': file_id, 'export': 'download', 'confirm': token}
+                response = requests.get('https://drive.google.com/uc', params=params, stream=True)
+        
         response.raise_for_status()
+        
+        # Check if response is HTML (means sharing is restricted)
+        content_type = response.headers.get('content-type', '')
+        if 'text/html' in content_type:
+            raise Exception("File is not publicly accessible. Please check sharing permissions.")
+        
         return BytesIO(response.content)
+        
     except Exception as e:
-        st.error(f"Error downloading file from GitHub: {e}")
+        st.error(f"Error downloading file from Google Drive: {e}")
         return None
 
 def make_pattern(text):
@@ -397,17 +426,25 @@ def main():
     threshold = st.sidebar.slider("Similarity Threshold", 0, 100, 50, help="Minimum similarity score for matches")
     top_n = st.sidebar.selectbox("Top N Matches", [1, 2, 3, 4, 5], index=0, help="Number of top matches to return")
     
-    # GitHub URLs input
-    st.sidebar.header("GitHub File URLs")
-    pattern_url = st.sidebar.text_input(
-        "Pattern File URL",
-        value=GITHUB_FILES["pattern_file"],
-        help="URL to the pattern reference file on GitHub"
+    # Google Drive File IDs input
+    st.sidebar.header("Google Drive File IDs")
+    st.sidebar.markdown("""
+    **How to get Google Drive File ID:**
+    1. Open the file in Google Drive
+    2. Click Share → Anyone with the link
+    3. Copy the link: `https://drive.google.com/file/d/FILE_ID/view`
+    4. Extract the FILE_ID part
+    """)
+    
+    pattern_file_id = st.sidebar.text_input(
+        "Pattern File ID",
+        value=DRIVE_FILES["pattern_file"],
+        help="Google Drive File ID for the pattern reference file"
     )
-    preset_url = st.sidebar.text_input(
-        "Preset File URL", 
-        value=GITHUB_FILES["preset_file"],
-        help="URL to the preset reference file on GitHub"
+    preset_file_id = st.sidebar.text_input(
+        "Preset File ID", 
+        value=DRIVE_FILES["preset_file"],
+        help="Google Drive File ID for the preset reference file"
     )
     
     # File upload
