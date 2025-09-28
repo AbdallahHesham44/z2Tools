@@ -2,6 +2,6 @@ streamlit
 pandas
 openpyxl
 requests
-rapidfuzz 
+rapidfuzz
 requests
 io
