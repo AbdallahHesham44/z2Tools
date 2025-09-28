@@ -136,13 +136,22 @@ def mark_patterns(df1, df2):
 
     # Create a set for fast lookup
     patterns_set = set(df2["Pattern_norm"].unique())
-
+    if "IsNumber" not in df1.columns:
+        df1["IsNumber"] = None
     # Check membership on normalized values
-    df1["IsNumber"] = df1["pattern_norm"].apply(lambda x: "Yes" if x in patterns_set else "No")
-
+    # df1["IsNumber"] = df1["pattern_norm"].apply(lambda x: "Yes" if x in patterns_set else "No")
+    df1["IsNumber"] = df1.apply(
+    lambda row: row["IsNumber"] if pd.notna(row["IsNumber"]) and row["IsNumber"].strip() != "" 
+    else ("Yes" if row["pattern_norm"] in patterns_set else "No"),
+    axis=1
+    )
     # Drop helper column if not needed
     df1.drop(columns=["pattern_norm"], inplace=True)
 
+
+
+
+    
     return df1
 
 def extract_numbers_by_pattern(value: str, pattern: str):
