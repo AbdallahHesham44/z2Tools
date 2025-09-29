@@ -682,3 +682,5 @@ def main():
         - **Different PLs**: Product lines don't match
         - **Not Found Data**: Required data not found in source files
         """)
+if __name__ == "__main__":
+    main()
