@@ -618,119 +618,119 @@ def main():
                     package_path = os.path.join(tmpdir, "package.xlsx")
                     recipe_path = os.path.join(tmpdir, "recipe.xlsx")
                     
-                    # with open(crosses_path, 'wb') as f:
-                    #     f.write(crosses_file.getvalue())
-                    # with open(parametric_path, 'wb') as f:
-                    #     f.write(parametric_file.getvalue())
-                    # with open(package_path, 'wb') as f:
-                    #     f.write(package_file.getvalue())
-                    # with open(recipe_path, 'wb') as f:
-                    #     f.write(recipe_file.getvalue())
+                    with open(crosses_path, 'wb') as f:
+                        f.write(crosses_file.getvalue())
+                    with open(parametric_path, 'wb') as f:
+                        f.write(parametric_file.getvalue())
+                    with open(package_path, 'wb') as f:
+                        f.write(package_file.getvalue())
+                    with open(recipe_path, 'wb') as f:
+                        f.write(recipe_file.getvalue())
                     
-                    # # Handle lookup files
-                    # use_lookup = "NO"
-                    # lookup1_path = None
-                    # lookup2_path = None
+                    # Handle lookup files
+                    use_lookup = "NO"
+                    lookup1_path = None
+                    lookup2_path = None
                     
-                    # if lookup1_file and lookup2_file:
-                    #     use_lookup = "YES"
-                    #     lookup1_path = os.path.join(tmpdir, "lookup1.xlsx")
-                    #     lookup2_path = os.path.join(tmpdir, "lookup2.xlsx")
-                    #     with open(lookup1_path, 'wb') as f:
-                    #         f.write(lookup1_file.getvalue())
-                    #     with open(lookup2_path, 'wb') as f:
-                    #         f.write(lookup2_file.getvalue())
-                    
-                    # # Step 1: Process files
-                    # st.info("Step 1/5: Validating input and comparing PLs...")
-                    # cross_df = process_files(crosses_path, parametric_path, package_path, recipe_path)
-                    # step1_path = os.path.join(tmpdir, "step1_output.xlsx")
-                    # cross_df.to_excel(step1_path, index=False)
-                    
-                    # # Step 2: Merge data
-                    # st.info("Step 2/5: Merging data from multiple sources...")
-                    # target_files = [parametric_path, package_path]
-                    # merged_df = merge_from_crossesparts(step1_path, target_files)
-                    # merged_path = os.path.join(tmpdir, "merged_output.xlsx")
-                    # merged_df.to_excel(merged_path, index=False)
-                    
-                    # # Step 3: Validate
-                    # st.info("Step 3/5: Validating core features and tolerances...")
-                    # if use_lookup == "YES":
-                    #     report_df = validate_core_upgrade_equal(
-                    #         recipe_path, merged_path, lookup1_path, lookup2_path, use_lookup
-                    #     )
-                    # else:
-                    #     report_df = validate_core_upgrade_equal(
-                    #         recipe_path, merged_path, None, None, use_lookup
-                    #     )
-                    # report_path = os.path.join(tmpdir, "validation_report.xlsx")
-                    # report_df.to_excel(report_path, index=False)
-                    
-                    # # Step 4: Merge all results
-                    # st.info("Step 4/5: Merging all results...")
-                    # final_df = merge_files(step1_path, report_path, crosses_path)
-                    # final_path = os.path.join(tmpdir, "final_merged.xlsx")
-                    # final_df.to_excel(final_path, index=False)
-                    
-                    # # Step 5: Organize output
-                    # st.info("Step 5/5: Organizing final output...")
-                    # organized_df = organize_file(final_df)
-                    
-                    # # Store results in session state
-                    # st.session_state.results = {
-                    #     'step1': cross_df,
-                    #     'merged': merged_df,
-                    #     'validation': report_df,
-                    #     'final': final_df,
-                    #     'organized': organized_df
-                    # }
-                    # Save uploaded required files
-                    with open(crosses_path, "wb") as f:
-                        f.write(crosses_file.getbuffer())
-                    with open(parametric_path, "wb") as f:
-                        f.write(parametric_file.getbuffer())
-                    with open(package_path, "wb") as f:
-                        f.write(package_file.getbuffer())
-                    with open(recipe_path, "wb") as f:
-                        f.write(recipe_file.getbuffer())
-
-                    # Optional lookup files
-                    lookup1_path, lookup2_path = None, None
-                    if lookup1_file:
+                    if lookup1_file and lookup2_file:
+                        use_lookup = "YES"
                         lookup1_path = os.path.join(tmpdir, "lookup1.xlsx")
-                        with open(lookup1_path, "wb") as f:
-                            f.write(lookup1_file.getbuffer())
-                    if lookup2_file:
                         lookup2_path = os.path.join(tmpdir, "lookup2.xlsx")
-                        with open(lookup2_path, "wb") as f:
-                            f.write(lookup2_file.getbuffer())
+                        with open(lookup1_path, 'wb') as f:
+                            f.write(lookup1_file.getvalue())
+                        with open(lookup2_path, 'wb') as f:
+                            f.write(lookup2_file.getvalue())
+                    
+                    # Step 1: Process files
+                    st.info("Step 1/5: Validating input and comparing PLs...")
+                    cross_df = process_files(crosses_path, parametric_path, package_path, recipe_path)
+                    step1_path = os.path.join(tmpdir, "step1_output.xlsx")
+                    cross_df.to_excel(step1_path, index=False)
+                    
+                    # Step 2: Merge data
+                    st.info("Step 2/5: Merging data from multiple sources...")
+                    target_files = [parametric_path, package_path]
+                    merged_df = merge_from_crossesparts(step1_path, target_files)
+                    merged_path = os.path.join(tmpdir, "merged_output.xlsx")
+                    merged_df.to_excel(merged_path, index=False)
+                    
+                    # Step 3: Validate
+                    st.info("Step 3/5: Validating core features and tolerances...")
+                    if use_lookup == "YES":
+                        report_df = validate_core_upgrade_equal(
+                            recipe_path, merged_path, lookup1_path, lookup2_path, use_lookup
+                        )
+                    else:
+                        report_df = validate_core_upgrade_equal(
+                            recipe_path, merged_path, None, None, use_lookup
+                        )
+                    report_path = os.path.join(tmpdir, "validation_report.xlsx")
+                    report_df.to_excel(report_path, index=False)
+                    
+                    # Step 4: Merge all results
+                    st.info("Step 4/5: Merging all results...")
+                    final_df = merge_files(step1_path, report_path, crosses_path)
+                    final_path = os.path.join(tmpdir, "final_merged.xlsx")
+                    final_df.to_excel(final_path, index=False)
+                    
+                    # Step 5: Organize output
+                    st.info("Step 5/5: Organizing final output...")
+                    organized_df = organize_file(final_df)
+                    
+                    # Store results in session state
+                    st.session_state.results = {
+                        'step1': cross_df,
+                        'merged': merged_df,
+                        'validation': report_df,
+                        'final': final_df,
+                        'organized': organized_df
+                    }
+                    # # Save uploaded required files
+                    # with open(crosses_path, "wb") as f:
+                    #     f.write(crosses_file.getbuffer())
+                    # with open(parametric_path, "wb") as f:
+                    #     f.write(parametric_file.getbuffer())
+                    # with open(package_path, "wb") as f:
+                    #     f.write(package_file.getbuffer())
+                    # with open(recipe_path, "wb") as f:
+                    #     f.write(recipe_file.getbuffer())
 
-                    # Step 1: process cross + parametric + package + recipe
-                    processed_df = process_files(crosses_path, parametric_path, package_path, recipe_path)
+                    # # Optional lookup files
+                    # lookup1_path, lookup2_path = None, None
+                    # if lookup1_file:
+                    #     lookup1_path = os.path.join(tmpdir, "lookup1.xlsx")
+                    #     with open(lookup1_path, "wb") as f:
+                    #         f.write(lookup1_file.getbuffer())
+                    # if lookup2_file:
+                    #     lookup2_path = os.path.join(tmpdir, "lookup2.xlsx")
+                    #     with open(lookup2_path, "wb") as f:
+                    #         f.write(lookup2_file.getbuffer())
 
-                    # Step 2: merge
-                    target_files = [parametric_path, package_path, recipe_path]
-                    merged_df = merge_from_crossesparts(crosses_path, target_files)
+                    # # Step 1: process cross + parametric + package + recipe
+                    # processed_df = process_files(crosses_path, parametric_path, package_path, recipe_path)
 
-                    # Step 3: validate
-                    report_df = validate_core_upgrade_equal(
-                        recipe_path, merged_df,
-                        lookup1_path, lookup2_path,
-                        loadLookUp="YES" if (lookup1_path and lookup2_path) else "NO"
-                    )
+                    # # Step 2: merge
+                    # target_files = [parametric_path, package_path, recipe_path]
+                    # merged_df = merge_from_crossesparts(crosses_path, target_files)
 
-                    # Step 4: merge all results
-                    final_df = merge_files(crosses_path, report_df, processed_df)
+                    # # Step 3: validate
+                    # report_df = validate_core_upgrade_equal(
+                    #     recipe_path, merged_df,
+                    #     lookup1_path, lookup2_path,
+                    #     loadLookUp="YES" if (lookup1_path and lookup2_path) else "NO"
+                    # )
 
-                    # Step 5: organize
-                    final_df = organize_file(final_df)
+                    # # Step 4: merge all results
+                    # final_df = merge_files(crosses_path, report_df, processed_df)
 
-                    # Store in session state
-                    st.session_state.processed = True
-                    st.session_state.results["final"] = final_df
+                    # # Step 5: organize
+                    # final_df = organize_file(final_df)
 
-                    st.session_state.processed = True
+                    # # Store in session state
+                    # st.session_state.processed = True
+                    # st.session_state.results["final"] = final_df
+
+                    # st.session_state.processed = True
                     
             st.markdown('<div class="success-box">✅ Processing completed successfully!</div>', unsafe_allow_html=True)
             
