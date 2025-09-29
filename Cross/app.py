@@ -655,7 +655,7 @@ def main():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
-    
+        
     # Info section
     with st.expander("ℹ️ Processing Pipeline Information"):
         st.markdown("""
