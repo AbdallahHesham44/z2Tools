@@ -866,6 +866,20 @@ def main():
                 st.session_state.processed = False
                 st.session_state.results = {}
                 st.rerun()
+            # Show results if processed
+        if st.session_state.processed:
+            st.success("✅ Processing completed successfully!")
+            st.dataframe(st.session_state.results["final"].head(50))  # preview top rows
+    
+            # Download Excel
+            excel_data = save_to_excel(st.session_state.results["final"])
+            st.download_button(
+                label="💾 Download Final Report",
+                data=excel_data,
+                file_name="cross_reference_report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
 
 if __name__ == "__main__":
     main()
