@@ -55,7 +55,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# PROCESSING FUNCTIONS (from your original code)
+# PROCESSING FUNCTIONS
 # ============================================================================
 
 def clean_to_floats(lst):
@@ -307,8 +307,8 @@ def validate_core_upgrade_equal(newcross_file, finalmerged_file, lookup_file1, l
     rules_df = pd.read_excel(newcross_file, dtype=str)
     data = pd.read_excel(finalmerged_file, dtype=str)
     
-    global values
-    if loadLookUp == "YES":
+    values = None
+    if loadLookUp == "YES" and lookup_file1 and lookup_file2:
         values1 = pd.read_excel(lookup_file1, dtype=str)
         values2 = pd.read_excel(lookup_file2, dtype=str)
         values = pd.concat([values1, values2], ignore_index=True)
@@ -404,7 +404,7 @@ def validate_core_upgrade_equal(newcross_file, finalmerged_file, lookup_file1, l
                         if val1 == val2:
                             status, grade = f"✅ Match", "A"
                         else:
-                            if loadLookUp == "YES":
+                            if loadLookUp == "YES" and values is not None:
                                 result = compare_parts(values, val1, val2)
                                 if result['nUnit'] != result['nUnit2']:
                                     status, grade = f"❌ Different units", "unitFail"
@@ -518,7 +518,8 @@ def organize_file(df):
         
         if grade in ["Drop-in D", "Drop-in A", "Drop-in B", "Drop-in C"]:
             return "Cross"
-        elif "Not Drop-in" in grade and found_data == "TRUE":
+        elif grade in ["Not Drop-in", "Detailed Value Type Fail Not Drop-in", 
+                       "Unit FAIL Not Drop-in", "FeatureCode FAIL Not Drop-in"] and found_data == "TRUE":
             return "Not Cross"
         elif same_pls == "not":
             return "Different PLs"
@@ -656,14 +657,9 @@ def main():
                     
                     # Step 3: Validate
                     st.info("Step 3/5: Validating core features and tolerances...")
-                    if use_lookup == "YES":
-                        report_df = validate_core_upgrade_equal(
-                            recipe_path, merged_path, lookup1_path, lookup2_path, use_lookup
-                        )
-                    else:
-                        report_df = validate_core_upgrade_equal(
-                            recipe_path, merged_path, None, None, use_lookup
-                        )
+                    report_df = validate_core_upgrade_equal(
+                        recipe_path, merged_path, lookup1_path, lookup2_path, use_lookup
+                    )
                     report_path = os.path.join(tmpdir, "validation_report.xlsx")
                     report_df.to_excel(report_path, index=False)
                     
@@ -685,52 +681,7 @@ def main():
                         'final': final_df,
                         'organized': organized_df
                     }
-                    # # Save uploaded required files
-                    # with open(crosses_path, "wb") as f:
-                    #     f.write(crosses_file.getbuffer())
-                    # with open(parametric_path, "wb") as f:
-                    #     f.write(parametric_file.getbuffer())
-                    # with open(package_path, "wb") as f:
-                    #     f.write(package_file.getbuffer())
-                    # with open(recipe_path, "wb") as f:
-                    #     f.write(recipe_file.getbuffer())
-
-                    # # Optional lookup files
-                    # lookup1_path, lookup2_path = None, None
-                    # if lookup1_file:
-                    #     lookup1_path = os.path.join(tmpdir, "lookup1.xlsx")
-                    #     with open(lookup1_path, "wb") as f:
-                    #         f.write(lookup1_file.getbuffer())
-                    # if lookup2_file:
-                    #     lookup2_path = os.path.join(tmpdir, "lookup2.xlsx")
-                    #     with open(lookup2_path, "wb") as f:
-                    #         f.write(lookup2_file.getbuffer())
-
-                    # # Step 1: process cross + parametric + package + recipe
-                    # processed_df = process_files(crosses_path, parametric_path, package_path, recipe_path)
-
-                    # # Step 2: merge
-                    # target_files = [parametric_path, package_path, recipe_path]
-                    # merged_df = merge_from_crossesparts(crosses_path, target_files)
-
-                    # # Step 3: validate
-                    # report_df = validate_core_upgrade_equal(
-                    #     recipe_path, merged_df,
-                    #     lookup1_path, lookup2_path,
-                    #     loadLookUp="YES" if (lookup1_path and lookup2_path) else "NO"
-                    # )
-
-                    # # Step 4: merge all results
-                    # final_df = merge_files(crosses_path, report_df, processed_df)
-
-                    # # Step 5: organize
-                    # final_df = organize_file(final_df)
-
-                    # # Store in session state
-                    # st.session_state.processed = True
-                    # st.session_state.results["final"] = final_df
-
-                    # st.session_state.processed = True
+                    st.session_state.processed = True
                     
             st.markdown('<div class="success-box">✅ Processing completed successfully!</div>', unsafe_allow_html=True)
             
@@ -760,7 +711,7 @@ def main():
         drop_in_b = grade_counts.get('Drop-in B', 0)
         drop_in_c = grade_counts.get('Drop-in C', 0)
         drop_in_d = grade_counts.get('Drop-in D', 0)
-        not_drop_in = len([g for g in grade_counts.index if 'Not Drop-in' in str(g)])
+        not_drop_in = sum([grade_counts[g] for g in grade_counts.index if 'Not Drop-in' in str(g)])
         
         # Display metrics
         col1, col2, col3, col4 = st.columns(4)
@@ -866,19 +817,6 @@ def main():
                 st.session_state.processed = False
                 st.session_state.results = {}
                 st.rerun()
-            # Show results if processed
-        if st.session_state.processed:
-            st.success("✅ Processing completed successfully!")
-            st.dataframe(st.session_state.results["final"].head(50))  # preview top rows
-    
-            # Download Excel
-            excel_data = save_to_excel(st.session_state.results["final"])
-            st.download_button(
-                label="💾 Download Final Report",
-                data=excel_data,
-                file_name="cross_reference_report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
 
 
 if __name__ == "__main__":
