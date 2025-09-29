@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -684,4 +683,3 @@ if st.button("🚀 Run Validation Pipeline"):
                 # Download link
                 with open(final_org_path, "rb") as f:
                     st.download_button("⬇️ Download Final Organized File", f, file_name="FINAL_ORGANIZED.xlsx")
-```
