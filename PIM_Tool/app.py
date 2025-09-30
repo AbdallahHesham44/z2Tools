@@ -83,6 +83,10 @@ uploaded_file = st.file_uploader("Upload your input Excel file", type=["xlsx"])
 if uploaded_file:
     # Load uploaded file
     df_input = pd.read_excel(uploaded_file, dtype=str)
+    
+    # 🚫 Filter out rows where Preset values is "-" or just whitespace/empty
+    df_input = df_input[~df_input["Preset values"].astype(str).str.strip().isin(["", "-"])]
+    df_input.reset_index(drop=True, inplace=True)
 
     # GitHub raw links for reference files
     github_files = {
