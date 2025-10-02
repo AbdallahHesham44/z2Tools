@@ -11,7 +11,7 @@ from io import BytesIO
 # Google Drive URLs for the reference files
 DRIVE_FILES = {
     "pattern_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/export?format=xlsx",
-    "preset_file": "https://docs.google.com/spreadsheets/d/1jXQvc7g7juMts5TNyXwGfBIrny_FPR6i/export?format=xlsx"
+    "preset_file": "https://docs.google.com/spreadsheets/d/1IhOFscHAvOH8erop8xg8HVWn6MMvMXvo/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true"
 }
 
 def download_file_from_drive(url):
