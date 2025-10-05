@@ -206,7 +206,7 @@ def determine_comment(is_number, per_value1, per_value2_nospecial, perc_num1_wor
         # IsNumber = Yes rules
         if per_value1 == 100 and per_value2_nospecial == 100:
             return "Found Exact Number"
-        elif (perc_num1_worst and perc_num1_worst > 98) or (perc_num2_worst and perc_num2_worst > 98):
+        elif (perc_num1_worst and perc_num1_worst > 97) or (perc_num2_worst and perc_num2_worst > 97):
             return "Found with minority Number"
         elif (perc_num1_worst and perc_num1_worst > 80) or (perc_num2_worst and perc_num2_worst > 80):
             return "Found with majority Number"
