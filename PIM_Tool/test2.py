@@ -9,9 +9,13 @@ import requests
 from io import BytesIO
 
 # Google Drive URLs for the reference files
+# DRIVE_FILES = {
+#     "pattern_file": "https://docs.google.com/spreadsheets/d/1IhOFscHAvOH8erop8xg8HVWn6MMvMXvo/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true",
+#     "preset_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true"
+# }
 DRIVE_FILES = {
-    "pattern_file": "https://docs.google.com/spreadsheets/d/1IhOFscHAvOH8erop8xg8HVWn6MMvMXvo/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true",
-    "preset_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true"
+    "pattern_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/export?format=xlsx",
+    "preset_file": "https://docs.google.com/spreadsheets/d/1IhOFscHAvOH8erop8xg8HVWn6MMvMXvo/export?format=xlsx"
 }
 
 def download_file_from_drive(url):
