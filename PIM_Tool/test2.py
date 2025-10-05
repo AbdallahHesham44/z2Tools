@@ -10,13 +10,22 @@ from io import BytesIO
 
 # Google Drive URLs for the reference files
 DRIVE_FILES = {
-    "pattern_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true",
-    "preset_file": "https://docs.google.com/spreadsheets/d/1jXQvc7g7juMts5TNyXwGfBIrny_FPR6i/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true"
+    "pattern_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/export?format=xlsx",
+    "preset_file": "https://docs.google.com/spreadsheets/d/1IhOFscHAvOH8erop8xg8HVWn6MMvMXvo/edit?usp=sharing&ouid=107529105221195873567&rtpof=true&sd=true"
 }
 
 def download_file_from_drive(url):
     """Download file from Google Drive URL"""
     try:
+        # Convert edit URL to export URL if needed
+        if "/edit" in url:
+            # Extract the document ID
+            import re
+            match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+            if match:
+                doc_id = match.group(1)
+                url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=xlsx"
+        
         response = requests.get(url)
         response.raise_for_status()
         return BytesIO(response.content)
