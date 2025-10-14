@@ -513,11 +513,9 @@ def remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
 
 def create_summary(df_result: pd.DataFrame) -> pd.DataFrame:
     """Create summary dataframe with optimized memory usage"""
-    summary_cols = [
-        "Category", "Sub-Category", "Attribute Name",
-        "Preset values", "isCaseSensitive", "Max Value", "Unit", "key",
-        "Value1", "HigherPercentage", "Comment", "IsExactMatch"
-    ]
+    summary_cols = ["Category", "Sub-Category", "Attribute Name",
+                               "Preset values", "isCaseSensitive","IsNumber", "Max Value", "Unit", "key",
+                               "Value1", "HigherPercentage", "Comment", "IsExactMatch"]
     
     # Only select columns that exist
     existing_cols = [c for c in summary_cols if c in df_result.columns]
