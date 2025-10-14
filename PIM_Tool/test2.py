@@ -380,6 +380,14 @@ def duplicate_rows_for_case_sensitivity(df):
     df_no['isCaseSensitive'] = 'No'
     df_combined = pd.concat([df_yes, df_no], ignore_index=True)
     return df_combined
+def remove_duplicates(df):
+    """Remove duplicates in summary file"""
+    subset_cols = ["key", "Value1", "HigherPercentage", "Comment"]
+    available_cols = [col for col in subset_cols if col in df.columns]
+    if available_cols:
+        df = df.drop_duplicates(subset=available_cols, keep="first")
+    return df
+
 
 def main():
     st.set_page_config(
@@ -484,7 +492,8 @@ def main():
                                 "Value1", "HigherPercentage", "Comment", "IsExactMatch"]
                 existing_summary_cols = [c for c in summary_cols if c in df_result.columns]
                 df_summary = df_result[existing_summary_cols].copy()
-                
+                        # Step 3: Remove duplicates at final summary
+                df_summary = remove_duplicates(df_processed)
                 st.header("💾 Download Results")
                 col1, col2 = st.columns(2)
                 with col1:
