@@ -7,6 +7,21 @@ from rapidfuzz import fuzz
 import numpy as np
 import requests
 from io import BytesIO
+from typing import List, Dict, Tuple, Optional
+import matplotlib.pyplot as plt
+
+# Constants
+SIMILARITY_THRESHOLDS = {
+    'EXACT': 100,
+    'MINORITY_NUMBER': 97,
+    'MAJORITY_NUMBER': 80,
+    'MINORITY_STRING': 90,
+    'MAJORITY_STRING_PRIMARY': 80,
+    'MAJORITY_STRING_SECONDARY': 90,
+    'SIMILAR_STRING': 70
+}
+
+REQUIRED_COLUMNS = ['Category', 'Sub-Category', 'Attribute Name', 'Preset values']
 
 # Google Drive URLs for the reference files
 DRIVE_FILES = {
@@ -15,7 +30,7 @@ DRIVE_FILES = {
     "isnumber_file": "https://docs.google.com/spreadsheets/d/1miXOKaln_uj5x52-vQmvqVtvKUKJuOnU/export?format=xlsx"
 }
 
-def download_file_from_drive(url):
+def download_file_from_drive(url: str) -> Optional[BytesIO]:
     """Download file from Google Drive URL"""
     try:
         # Convert edit URL to export URL if needed
@@ -25,7 +40,7 @@ def download_file_from_drive(url):
                 doc_id = match.group(1)
                 url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=xlsx"
         
-        response = requests.get(url)
+        response = requests.get(url, timeout=30)
         response.raise_for_status()
         return BytesIO(response.content)
     except Exception as e:
@@ -33,7 +48,7 @@ def download_file_from_drive(url):
         return None
 
 @st.cache_data
-def load_reference_files():
+def load_reference_files() -> Tuple[Optional[BytesIO], Optional[BytesIO], Optional[BytesIO]]:
     """Load reference files from Google Drive (pattern, preset, isnumber)"""
     pattern_file = download_file_from_drive(DRIVE_FILES["pattern_file"])
     preset_file = download_file_from_drive(DRIVE_FILES["preset_file"])
@@ -44,7 +59,15 @@ def load_reference_files():
     
     return pattern_file, preset_file, isnumber_file
 
-def make_pattern(text):
+def validate_dataframe(df: pd.DataFrame, required_cols: List[str]) -> Tuple[bool, str]:
+    """Validate that DataFrame has required columns"""
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        return False, f"Missing columns: {', '.join(missing)}"
+    return True, ""
+
+def make_pattern(text: str) -> str:
+    """Convert numbers to $ pattern"""
     def replacer(match):
         integer_part = match.group(1)
         decimal_part = match.group(2)
@@ -53,27 +76,40 @@ def make_pattern(text):
         return integer_replaced + ("." + decimal_replaced if decimal_part else "")
     return re.sub(r"(\d+)(?:\.(\d+))?", replacer, text)
 
-def process_excel(df):
-    """Process the uploaded DataFrame"""
-    df = df[~df["Preset values"].astype(str).str.strip().isin(["", "-"])]
+def process_excel(df: pd.DataFrame) -> pd.DataFrame:
+    """Process the uploaded DataFrame with validation"""
+    # Validate input
+    is_valid, error_msg = validate_dataframe(df, REQUIRED_COLUMNS)
+    if not is_valid:
+        raise ValueError(error_msg)
+    
+    # Convert to string once
+    str_cols = ["Category", "Sub-Category", "Attribute Name", "Preset values"]
+    for col in str_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+    
+    # Filter empty values
+    df = df[~df["Preset values"].str.strip().isin(["", "-", "nan"])].copy()
     df.reset_index(drop=True, inplace=True)
     
+    # Create key column
     df["key"] = (
-        df["Category"].astype(str) + "|" +
-        df["Sub-Category"].astype(str) + "|" +
-        df["Attribute Name"].astype(str)
+        df["Category"] + "|" +
+        df["Sub-Category"] + "|" +
+        df["Attribute Name"]
     )
     
-    df["Helper_pattern"] = df["Preset values"].astype(str).apply(
-        lambda x: re.sub(r"\d+(\.\d+)?", "$", x)
-    )
-    df["pattern"] = df["Preset values"].astype(str).apply(make_pattern)
+    # Create pattern columns
+    df["Helper_pattern"] = df["Preset values"].str.replace(r"\d+(\.\d+)?", "$", regex=True)
+    df["pattern"] = df["Preset values"].apply(make_pattern)
     df["count"] = df.groupby(["key", "pattern"])["pattern"].transform("count")
     
     return df
 
-def sort_preset_values(df):
-    def is_alpha_only(s):
+def sort_preset_values(df: pd.DataFrame) -> pd.DataFrame:
+    """Sort preset values alphabetically within groups"""
+    def is_alpha_only(s: str) -> bool:
         return bool(re.fullmatch(r"[A-Za-z\s]+", s))
     
     def sort_groups(val):
@@ -98,15 +134,19 @@ def sort_preset_values(df):
     return df
 
 def normalize_case(s: str) -> str:
+    """Normalize to lowercase"""
     return s.lower()
 
 def normalize_alpha(s: str) -> str:
+    """Remove non-alpha characters and lowercase"""
     return re.sub(r'[^a-zA-Z]+', '', s).lower()
 
 def normalize_alnum(s: str) -> str:
+    """Remove non-alphanumeric characters and lowercase"""
     return re.sub(r'[^a-zA-Z0-9]+', '', s).lower()
 
 def normalize_pattern(s: str) -> str:
+    """Normalize pattern for comparison"""
     if not isinstance(s, str):
         return ""
     s = s.strip()
@@ -114,14 +154,17 @@ def normalize_pattern(s: str) -> str:
     s = s.replace("±", "+-")
     return s.lower()
 
-def mark_patterns(df1, df2):
+def mark_patterns(df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
+    """Mark rows with IsNumber flag based on pattern matching"""
     df1["pattern_norm"] = df1["Helper_pattern"].apply(normalize_pattern)
     df2["Pattern_norm"] = df2["Pattern"].apply(normalize_pattern)
 
     patterns_set = set(df2["Pattern_norm"].unique())
-    # If no IsNumber column, create it (will be filled partially from external file)
+    
+    # Initialize IsNumber if not exists
     if "IsNumber" not in df1.columns:
         df1["IsNumber"] = None
+    
     df1["IsNumber"] = df1.apply(
         lambda row: row["IsNumber"] if pd.notna(row["IsNumber"]) and str(row["IsNumber"]).strip() != ""
         else ("Yes" if row["pattern_norm"] in patterns_set else "No"),
@@ -130,7 +173,27 @@ def mark_patterns(df1, df2):
     df1.drop(columns=["pattern_norm"], inplace=True)
     return df1
 
-def extract_numbers_by_pattern(value: str, pattern: str):
+def merge_isnumber_safely(df: pd.DataFrame, df_isnumber: pd.DataFrame) -> pd.DataFrame:
+    """Safely merge IsNumber column from external file"""
+    df_isnumber = df_isnumber.copy()
+    df_isnumber["key"] = (
+        df_isnumber["Category"].astype(str) + "|" +
+        df_isnumber["Sub-Category"].astype(str) + "|" +
+        df_isnumber["Attribute Name"].astype(str)
+    )
+    
+    # Drop IsNumber if it exists in df to avoid conflicts
+    if "IsNumber" in df.columns:
+        df = df.drop(columns=["IsNumber"])
+    
+    # Merge only IsNumber column, removing duplicates first
+    isnumber_merge = df_isnumber[["key", "IsNumber"]].drop_duplicates(subset=["key"])
+    df = df.merge(isnumber_merge, on="key", how="left")
+    
+    return df
+
+def extract_numbers_by_pattern(value: str, pattern: str) -> List[float]:
+    """Extract numbers from value based on pattern"""
     if not isinstance(value, str) or not isinstance(pattern, str):
         return []
     regex_pattern = re.escape(pattern).replace("\\$", r"(\d*\.?\d+)")
@@ -139,7 +202,8 @@ def extract_numbers_by_pattern(value: str, pattern: str):
         return []
     return [float(x) for x in match.groups() if x]
 
-def compare_two_numbers(numA, numB):
+def compare_two_numbers(numA: List[float], numB: List[float]) -> Tuple[str, str]:
+    """Compare two lists of numbers and return division and percentage strings"""
     div_parts, per_parts = [], []
     for a, b in zip(numA, numB):
         if a == 0 and b == 0:
@@ -153,65 +217,107 @@ def compare_two_numbers(numA, numB):
             per_parts.append(f"{min(a,b)/max(a,b)*100:.1f}")
     return " | ".join(div_parts), " | ".join(per_parts)
 
-def calc_overall_percentage(perc_str):
+def calc_overall_percentage(perc_str: str) -> float:
+    """Calculate average percentage from string"""
     if not perc_str:
-        return ""
+        return 0.0
     nums = [float(x) for x in perc_str.split(" | ") if x.replace(".", "", 1).isdigit()]
     if not nums:
-        return ""
+        return 0.0
     return round(sum(nums) / len(nums), 2)
 
-def calc_worst_percentage(perc_str):
+def calc_worst_percentage(perc_str: str) -> float:
+    """Calculate worst (minimum) percentage from string"""
     if not perc_str:
-        return ""
+        return 0.0
     nums = [float(x) for x in perc_str.split(" | ") if x.replace(".", "", 1).isdigit()]
     if not nums:
-        return ""
+        return 0.0
     return min(nums)
 
-def determine_comment(is_number, per_value1, per_value2_nospecial, perc_num1_worst, perc_num2_worst, comment_value1, is_caseSensitive=False):
+def determine_comment(is_number: bool, per_value1: float, per_value2_nospecial: float, 
+                     perc_num1_worst: float, perc_num2_worst: float, 
+                     comment_value1: str, is_caseSensitive: bool = False) -> str:
+    """Determine comment based on matching results"""
     if comment_value1 == "no match found":
         return "Category not found"
+    
     if is_number:
-        if per_value1 == 100 and per_value2_nospecial == 100:
+        # Number matching logic
+        if per_value1 == SIMILARITY_THRESHOLDS['EXACT'] and \
+           per_value2_nospecial == SIMILARITY_THRESHOLDS['EXACT']:
             return "Found Exact Number"
-        elif (perc_num1_worst and perc_num1_worst > 97) or (perc_num2_worst and perc_num2_worst > 97):
+        
+        worst_perc = max(perc_num1_worst or 0, perc_num2_worst or 0)
+        if worst_perc > SIMILARITY_THRESHOLDS['MINORITY_NUMBER']:
             return "Found with minority Number"
-        elif (perc_num1_worst and perc_num1_worst > 80) or (perc_num2_worst and perc_num2_worst > 80):
+        elif worst_perc > SIMILARITY_THRESHOLDS['MAJORITY_NUMBER']:
             return "Found with majority Number"
         else:
             return "Not Found Number"
     else:
-        if per_value1 == 100 and per_value2_nospecial == 100 and is_caseSensitive:
-            return "Found Exact String with caseSensitive"
-        elif per_value1 == 100 and per_value2_nospecial == 100:
+        # String matching logic
+        if per_value1 == SIMILARITY_THRESHOLDS['EXACT'] and \
+           per_value2_nospecial == SIMILARITY_THRESHOLDS['EXACT']:
+            if is_caseSensitive:
+                return "Found Exact String with caseSensitive"
             return "Found Exact String"
-        elif per_value1 == 0 and per_value2_nospecial == 0:
+        
+        if per_value1 == 0 and per_value2_nospecial == 0:
             return "Not Found String"
-        elif per_value1 > 90 and per_value2_nospecial == 100:
+        
+        if per_value1 > SIMILARITY_THRESHOLDS['MINORITY_STRING'] and \
+           per_value2_nospecial == SIMILARITY_THRESHOLDS['EXACT']:
             return "Found with minority String"
-        elif per_value1 > 80 and per_value2_nospecial > 90:
+        
+        if per_value1 > SIMILARITY_THRESHOLDS['MAJORITY_STRING_PRIMARY'] and \
+           per_value2_nospecial > SIMILARITY_THRESHOLDS['MAJORITY_STRING_SECONDARY']:
             return "Found with majority String"
-        elif per_value2_nospecial > 70:
+        
+        if per_value2_nospecial > SIMILARITY_THRESHOLDS['SIMILAR_STRING']:
             return "Similar String"
-        else:
-            return "Not Found String"
+        
+        return "Not Found String"
 
-def check_exact_match(val1, val2, case_sensitive=False):
+def check_exact_match(val1: str, val2: str, case_sensitive: bool = False) -> bool:
+    """Check if two values are exactly equal"""
     if case_sensitive:
         return val1.strip() == val2.strip()
     else:
         return val1.strip().lower() == val2.strip().lower()
 
-def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2, filter_exact_matches=False):
+def compare_files_with_conditional_numbers(df1: pd.DataFrame, df2: pd.DataFrame, 
+                                           threshold: int = 0, top_n: int = 2, 
+                                           filter_exact_matches: bool = False) -> pd.DataFrame:
+    """Compare two dataframes with number and string matching logic"""
     results = []
+    total_rows = len(df1)
+    
+    # Create progress tracking
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Group df2 by key for faster lookups
+    df2_grouped = df2.groupby("key")
+    
     for idx, row in df1.iterrows():
+        # Update progress every 10 rows
+        if idx % 10 == 0 or idx == total_rows - 1:
+            progress = (idx + 1) / total_rows
+            progress_bar.progress(progress)
+            status_text.text(f"Processing row {idx + 1} of {total_rows}...")
+        
         key = row["key"]
         val1 = str(row["Preset values"])
         is_number = str(row.get("IsNumber", "")).strip().lower() == "yes"
         is_caseSensitive = str(row.get("isCaseSensitive", "")).strip().lower() == "yes"
 
-        candidates = df2[df2["key"] == key]
+        # Fast lookup using grouped data
+        if key in df2_grouped.groups:
+            candidates = df2_grouped.get_group(key)
+        else:
+            candidates = pd.DataFrame()
+        
         if candidates.empty:
             row_out = row.to_dict()
             base_update = {
@@ -238,25 +344,26 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2, filte
                     "percentageNumber_Value2_overall": "",
                     "percentageNumber_Value2_worst": 0,
                 })
-            comment = determine_comment(is_number, 0, 0,
-                                        0 if is_number else None,
-                                        0 if is_number else None,
-                                        "no match found")
+            comment = determine_comment(is_number, 0, 0, 0, 0, "no match found")
             base_update["Comment"] = comment
             row_out.update(base_update)
             results.append(row_out)
             continue
 
+        # Calculate similarities for all candidates
         sims = []
         for _, cand in candidates.iterrows():
             main_val2 = str(cand["Preset values"])
             val2 = str(cand["Preset values"]).lower()
             is_exact = check_exact_match(val1, main_val2, is_caseSensitive)
+            
             if is_caseSensitive:
                 sim = fuzz.ratio(val1.lower(), val2)
             else:
                 sim = fuzz.ratio(val1, main_val2)
+            
             sim_noSpecial = fuzz.ratio(normalize_alnum(val1), normalize_alnum(val2))
+            
             sims.append({
                 "val2": main_val2,
                 "sim": sim,
@@ -267,6 +374,7 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2, filte
 
         sims_sorted = sorted(sims, key=lambda x: x["sim"], reverse=True)[:top_n]
         has_exact_match = any(m["is_exact"] for m in sims_sorted)
+        
         if filter_exact_matches and has_exact_match:
             continue
 
@@ -277,6 +385,7 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2, filte
             helper_pattern_val = match["helper_pattern"]
             is_exact = match["is_exact"]
 
+            # Determine comment type
             if normalize_case(val1) == normalize_case(best_val) and val1 != best_val:
                 comment = "caseSensitive"
             elif normalize_alpha(val1) == normalize_alpha(best_val) and val1 != best_val:
@@ -310,12 +419,15 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2, filte
                 pat_preset = row.get("Helper_pattern", "")
                 value_num1, perc_num1 = "", ""
                 value_num2, perc_num2 = "", ""
+                nums_base = []
+                
                 if pat_preset == helper_pattern_val:
                     nums_base = extract_numbers_by_pattern(val1, pat_preset)
                     nums1 = extract_numbers_by_pattern(best_val, helper_pattern_val)
                     if nums_base and nums1 and len(nums_base) == len(nums1):
                         value_num1, perc_num1 = compare_two_numbers(nums_base, nums1)
-                if pat_preset == helper_pattern_val:
+                
+                if pat_preset == helper_pattern_val and nums_base:
                     nums2 = extract_numbers_by_pattern(best_val, helper_pattern_val)
                     if nums_base and nums2 and len(nums_base) == len(nums2):
                         value_num2, perc_num2 = compare_two_numbers(nums_base, nums2)
@@ -343,7 +455,7 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2, filte
 
             perc1_worst_val = base_update.get("percentageNumber_Value1_worst", 0) if is_number else None
             perc2_worst_val = base_update.get("percentageNumber_Value2_worst", 0) if is_number else None
-            comment = determine_comment(
+            final_comment = determine_comment(
                 is_number,
                 best_score,
                 best_score_noSpecial,
@@ -352,14 +464,19 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2, filte
                 comment,
                 is_caseSensitive
             )
-            base_update["Comment"] = comment
+            base_update["Comment"] = final_comment
             row_out.update(base_update)
             results.append(row_out)
 
             if best_score == 100 and best_score_noSpecial == 100:
                 break
-
+    
+    progress_bar.progress(1.0)
+    status_text.text("Processing complete!")
+    
     df_out = pd.DataFrame(results)
+    
+    # Sort results
     if any(str(row.get("IsNumber", "")).strip().lower() == "yes" for _, row in df1.iterrows()):
         sort_cols = [
             "HigherPercentage",
@@ -371,23 +488,52 @@ def compare_files_with_conditional_numbers(df1, df2, threshold=0, top_n=2, filte
         existing_cols = [c for c in sort_cols if c in df_out.columns]
         if len(existing_cols) > 2:
             df_out = df_out.sort_values(by=existing_cols, ascending=[False]*len(existing_cols))
+    
     return df_out
 
-def duplicate_rows_for_case_sensitivity(df):
+def duplicate_rows_for_case_sensitivity(df: pd.DataFrame) -> pd.DataFrame:
+    """Duplicate rows to test both case-sensitive and case-insensitive matching"""
     df_yes = df.copy()
     df_yes['isCaseSensitive'] = 'Yes'
     df_no = df.copy()
     df_no['isCaseSensitive'] = 'No'
     df_combined = pd.concat([df_yes, df_no], ignore_index=True)
     return df_combined
-def remove_duplicates(df):
+
+def remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
     """Remove duplicates in summary file"""
     subset_cols = ["key", "Value1", "HigherPercentage", "Comment"]
     available_cols = [col for col in subset_cols if col in df.columns]
-    if available_cols:
-        df = df.drop_duplicates(subset=available_cols, keep="first")
-    return df
+    
+    if not available_cols:
+        return df
+    
+    df_dedup = df.drop_duplicates(subset=available_cols, keep="first")
+    return df_dedup.reset_index(drop=True)
 
+def create_summary(df_result: pd.DataFrame) -> pd.DataFrame:
+    """Create summary dataframe with optimized memory usage"""
+    summary_cols = [
+        "Category", "Sub-Category", "Attribute Name",
+        "Preset values", "isCaseSensitive", "Max Value", "Unit", "key",
+        "Value1", "HigherPercentage", "Comment", "IsExactMatch"
+    ]
+    
+    # Only select columns that exist
+    existing_cols = [c for c in summary_cols if c in df_result.columns]
+    df_summary = df_result[existing_cols].copy()
+    
+    # Remove duplicates - FIXED BUG
+    df_summary = remove_duplicates(df_summary)
+    
+    # Convert to categorical for memory savings
+    categorical_cols = ["Category", "Sub-Category", "Attribute Name", 
+                        "isCaseSensitive", "Comment"]
+    for col in categorical_cols:
+        if col in df_summary.columns:
+            df_summary[col] = df_summary[col].astype('category')
+    
+    return df_summary
 
 def main():
     st.set_page_config(
@@ -395,12 +541,17 @@ def main():
         page_icon="📊",
         layout="wide"
     )
+    
     st.title("📊 Data Processing and Comparison Tool")
     st.markdown("Upload your Excel file and let the system process it against reference data from Google Drive.")
     
+    # Sidebar parameters
     st.sidebar.header("⚙️ Parameters")
-    threshold = st.sidebar.slider("Similarity Threshold", 0, 100, 50, help="Minimum similarity score for matches")
-    top_n = st.sidebar.selectbox("Top N Matches", [1, 2, 3, 4, 5], index=0, help="Number of top matches to consider")
+    threshold = st.sidebar.slider("Similarity Threshold", 0, 100, 50, 
+                                  help="Minimum similarity score for matches")
+    top_n = st.sidebar.selectbox("Top N Matches", [1, 2, 3, 4, 5], index=0, 
+                                 help="Number of top matches to consider")
+    
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Filtering Options")
     filter_exact = st.sidebar.checkbox(
@@ -409,6 +560,7 @@ def main():
         help="Remove rows where an exact match is found in the comparison"
     )
     
+    # File upload
     st.header("📁 File Upload")
     uploaded_file = st.file_uploader(
         "Choose an Excel file",
@@ -420,13 +572,18 @@ def main():
         try:
             with st.spinner("Loading uploaded file..."):
                 df_uploaded = pd.read_excel(uploaded_file, dtype=str)
-            st.success(f"✅ Uploaded file loaded successfully! ({len(df_uploaded)} rows)")
-            with st.expander("📋 Preview of Uploaded Data"):
-                st.dataframe(df_uploaded.head(), use_container_width=True)
             
+            st.success(f"✅ Uploaded file loaded successfully! ({len(df_uploaded)} rows)")
+            
+            with st.expander("📋 Preview of Uploaded Data"):
+                st.dataframe(df_uploaded.head(10), use_container_width=True)
+            
+            # Process data
             st.header("🔄 Processing Data")
+            
             with st.spinner("Loading reference files from Google Drive..."):
                 pattern_file, preset_file, isnumber_file = load_reference_files()
+            
             if pattern_file is None or preset_file is None or isnumber_file is None:
                 st.error("❌ Failed to load reference files from Google Drive. Please check the URLs.")
                 return
@@ -438,34 +595,34 @@ def main():
                 st.success("✅ Reference files loaded successfully!")
                 
                 with st.spinner("Processing your data..."):
+                    # Process uploaded file
                     df_processed = process_excel(df_uploaded.copy())
                     
-                    # ---- NEW: Merge IsNumber flag from isnumber file ----
-                    df_isnumber["key"] = (
-                        df_isnumber["Category"].astype(str) + "|" +
-                        df_isnumber["Sub-Category"].astype(str) + "|" +
-                        df_isnumber["Attribute Name"].astype(str)
-                    )
-                    # Only keep relevant columns from df_isnumber
-                    df_processed = df_processed.merge(
-                        df_isnumber[["key", "IsNumber"]],
-                        on="key",
-                        how="left"
-                    )
-                    # -------------------------------------------------------
+                    # Merge IsNumber flag from external file
+                    df_processed = merge_isnumber_safely(df_processed, df_isnumber)
                     
+                    # Sort preset values
                     df_sorted = sort_preset_values(df_processed)
+                    
+                    # Mark patterns
                     df_marked = mark_patterns(df_sorted, df_pattern)
+                    
+                    # Duplicate for case sensitivity
                     df_with_case_sensitivity = duplicate_rows_for_case_sensitivity(df_marked)
                     st.info(f"ℹ️ Created {len(df_with_case_sensitivity)} rows ({len(df_marked)} original × 2 for case sensitivity variations)")
                     
+                    # Compare files
                     df_result = compare_files_with_conditional_numbers(
-                        df_with_case_sensitivity, df_preset, threshold, top_n, filter_exact_matches=filter_exact
+                        df_with_case_sensitivity, df_preset, threshold, top_n, 
+                        filter_exact_matches=filter_exact
                     )
                 
                 st.success("🎉 Processing completed successfully!")
+                
+                # Display results
                 st.header("📊 Results")
                 col1, col2, col3, col4, col5 = st.columns(5)
+                
                 with col1:
                     st.metric("Total Rows", len(df_result))
                 with col2:
@@ -487,15 +644,13 @@ def main():
                 with st.expander("📋 Full Results", expanded=True):
                     st.dataframe(df_result, use_container_width=True)
                 
-                summary_cols = ["Category", "Sub-Category", "Attribute Name",
-                                "Preset values", "isCaseSensitive", "Max Value", "Unit", "key",
-                                "Value1", "HigherPercentage", "Comment", "IsExactMatch"]
-                existing_summary_cols = [c for c in summary_cols if c in df_result.columns]
-                df_summary = df_result[existing_summary_cols].copy()
-                        # Step 3: Remove duplicates at final summary
-                df_summary = remove_duplicates(df_processed)
+                # Create summary - FIXED BUG HERE
+                df_summary = create_summary(df_result)
+                
+                # Download buttons
                 st.header("💾 Download Results")
                 col1, col2 = st.columns(2)
+                
                 with col1:
                     output_buffer = BytesIO()
                     df_result.to_excel(output_buffer, index=False, engine='openpyxl')
@@ -506,6 +661,7 @@ def main():
                         file_name=f"processed_results_{uploaded_file.name}",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
+                
                 with col2:
                     summary_buffer = BytesIO()
                     df_summary.to_excel(summary_buffer, index=False, engine='openpyxl')
@@ -517,9 +673,12 @@ def main():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                 
+                # Analysis section
                 st.header("📈 Analysis")
                 tab1, tab2, tab3 = st.tabs(["Comment Distribution", "Case Sensitivity Analysis", "Higher Percentage Distribution"])
+                
                 with tab1:
+                    st.subheader("Comment Distribution")
                     comment_counts = df_result['Comment'].value_counts()
                     if not comment_counts.empty:
                         st.bar_chart(comment_counts)
@@ -529,9 +688,14 @@ def main():
                                     'Comment': comment_counts.index,
                                     'Count': comment_counts.values,
                                     'Percentage': (comment_counts.values / len(df_result) * 100).round(2)
-                                })
+                                }),
+                                use_container_width=True
                             )
+                    else:
+                        st.info("No comment data available")
+                
                 with tab2:
+                    st.subheader("Case Sensitivity Analysis")
                     case_counts = df_result['isCaseSensitive'].value_counts()
                     if not case_counts.empty:
                         st.bar_chart(case_counts)
@@ -541,34 +705,49 @@ def main():
                             pd.DataFrame({
                                 'Case Sensitivity': avg_by_case.index,
                                 'Average Higher %': avg_by_case.values.round(2)
-                            })
+                            }),
+                            use_container_width=True
                         )
+                    else:
+                        st.info("No case sensitivity data available")
+                
                 with tab3:
                     st.subheader("Higher Percentage Statistics")
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Mean", f"{df_result['HigherPercentage'].mean():.2f}%")
-                    with col2:
-                        st.metric("Median", f"{df_result['HigherPercentage'].median():.2f}%")
-                    with col3:
-                        st.metric("Min", f"{df_result['HigherPercentage'].min():.2f}%")
-                    with col4:
-                        st.metric("Max", f"{df_result['HigherPercentage'].max():.2f}%")
-                    import matplotlib.pyplot as plt
-                    fig, ax = plt.subplots(figsize=(10, 4))
-                    ax.hist(df_result['HigherPercentage'], bins=20, edgecolor='black')
-                    ax.set_xlabel('Higher Percentage')
-                    ax.set_ylabel('Frequency')
-                    ax.set_title('Distribution of Higher Percentage Values')
-                    st.pyplot(fig)
+                    if 'HigherPercentage' in df_result.columns:
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric("Mean", f"{df_result['HigherPercentage'].mean():.2f}%")
+                        with col2:
+                            st.metric("Median", f"{df_result['HigherPercentage'].median():.2f}%")
+                        with col3:
+                            st.metric("Min", f"{df_result['HigherPercentage'].min():.2f}%")
+                        with col4:
+                            st.metric("Max", f"{df_result['HigherPercentage'].max():.2f}%")
+                        
+                        # Histogram
+                        fig, ax = plt.subplots(figsize=(10, 4))
+                        ax.hist(df_result['HigherPercentage'], bins=20, edgecolor='black', alpha=0.7)
+                        ax.set_xlabel('Higher Percentage')
+                        ax.set_ylabel('Frequency')
+                        ax.set_title('Distribution of Higher Percentage Values')
+                        ax.grid(axis='y', alpha=0.3)
+                        st.pyplot(fig)
+                    else:
+                        st.info("No percentage data available")
                 
             except Exception as e:
                 st.error(f"❌ Error processing reference files: {str(e)}")
+                st.exception(e)
+                
         except Exception as e:
             st.error(f"❌ Error reading uploaded file: {str(e)}")
             st.info("Please make sure your file is a valid Excel file with the required columns.")
+            st.exception(e)
+    
     else:
         st.info("👆 Please upload an Excel file to get started.")
+        
         st.header("📋 Required File Format")
         st.markdown("""
         Your Excel file should contain the following columns:
@@ -581,6 +760,34 @@ def main():
 
         **Note**: Each row will be automatically duplicated to test both case-sensitive (Yes) and case-insensitive (No) matching.
         """)
+        
+        st.header("🔍 How It Works")
+        with st.expander("Click to learn more about the processing pipeline"):
+            st.markdown("""
+            ### Processing Steps:
+            1. **Upload**: Your Excel file is validated for required columns
+            2. **Reference Loading**: Pattern, preset, and IsNumber files are loaded from Google Drive
+            3. **Processing**: 
+               - Creates unique keys from Category, Sub-Category, and Attribute Name
+               - Generates patterns from numeric values
+               - Merges IsNumber flags from reference file
+               - Sorts preset values alphabetically
+            4. **Case Sensitivity**: Duplicates data to test both case-sensitive and case-insensitive matching
+            5. **Comparison**: 
+               - Fuzzy matching using RapidFuzz library
+               - Number extraction and comparison for numeric patterns
+               - String similarity scoring
+            6. **Results**: Detailed results with match percentages, comments, and exact match flags
+            
+            ### Key Features:
+            - ✅ Automatic pattern recognition for numbers
+            - ✅ Case-sensitive and case-insensitive matching
+            - ✅ Fuzzy string matching with multiple algorithms
+            - ✅ Number comparison with percentage calculations
+            - ✅ Detailed comment classification
+            - ✅ Progress tracking for large files
+            - ✅ Duplicate removal in summary
+            """)
 
 if __name__ == "__main__":
     main()
