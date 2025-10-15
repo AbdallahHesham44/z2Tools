@@ -9,6 +9,9 @@ import math
 
 EXCEL_ROW_LIMIT = 1_048_576  # Excel sheet row limit
 
+# ----------------------------------------------------------------
+# Extract ZIP or RAR archive
+# ----------------------------------------------------------------
 def extract_archive(file_buffer, temp_dir, file_type):
     archive_path = os.path.join(temp_dir, f"uploaded.{file_type}")
     
@@ -29,6 +32,9 @@ def extract_archive(file_buffer, temp_dir, file_type):
 
     return extracted_files
 
+# ----------------------------------------------------------------
+# Merge all Excel files by sheet names
+# ----------------------------------------------------------------
 def merge_excel_files_by_sheets(temp_dir):
     sheet_data = {}  # {sheet_name: DataFrame}
 
@@ -41,25 +47,33 @@ def merge_excel_files_by_sheets(temp_dir):
                 for sheet_name, df in xls.items():
                     if sheet_name not in sheet_data:
                         sheet_data[sheet_name] = pd.DataFrame()
-                    sheet_data[sheet_name] = pd.concat([sheet_data[sheet_name], df], ignore_index=True)
+                    sheet_data[sheet_name] = pd.concat(
+                        [sheet_data[sheet_name], df], ignore_index=True
+                    )
             except Exception as e:
                 st.warning(f"❌ Failed to read {filename}: {e}")
     
     return sheet_data
 
+# ----------------------------------------------------------------
+# Save merged sheets to Excel files with row limit split
+# ----------------------------------------------------------------
 def save_to_excel_with_row_limit(sheet_data):
     output_files = []
     
     for sheet_name, df in sheet_data.items():
-        if len(df) > EXCEL_ROW_LIMIT - 1:  # -1 for header
+        if len(df) > EXCEL_ROW_LIMIT - 1:
             num_parts = math.ceil(len(df) / (EXCEL_ROW_LIMIT - 1))
             for i in range(num_parts):
-                part_df = df.iloc[i*(EXCEL_ROW_LIMIT - 1):(i+1)*(EXCEL_ROW_LIMIT - 1)]
+                start = i * (EXCEL_ROW_LIMIT - 1)
+                end = (i + 1) * (EXCEL_ROW_LIMIT - 1)
+                part_df = df.iloc[start:end]
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    part_df.to_excel(writer, index=False, sheet_name=sheet_name)
+                    part_df.to_excel(writer, index=False, sheet_name=f"{sheet_name}_part{i+1}")
                 output.seek(0)
-                output_files.append((f"{sheet_name}_part{i+1}.xlsx", output))
+                filename = f"{sheet_name}_part{i+1}.xlsx"
+                output_files.append((filename, output))
         else:
             output = BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -69,14 +83,16 @@ def save_to_excel_with_row_limit(sheet_data):
     
     return output_files
 
-# --- Streamlit UI ---
+# ----------------------------------------------------------------
+# Streamlit UI
+# ----------------------------------------------------------------
 st.set_page_config(page_title="Excel Merger", page_icon="📊")
 st.title("📁 Merge Excel Files from Archive (Multi-Sheet Support)")
 
 st.markdown("""
-🔄 Upload a `.zip` or `.rar` file containing multiple Excel files with the **same sheet names**.
-This tool will merge them **sheet-by-sheet** into final Excel files.
-If any sheet exceeds **1,048,576 rows**, it will be split into multiple files.
+🔄 Upload a `.zip` or `.rar` file containing multiple Excel files with the **same sheet names**.  
+This tool will merge them **sheet-by-sheet** into final Excel files.  
+If any sheet exceeds **1,048,576 rows**, it will be split into multiple `.xlsx` files.
 """)
 
 uploaded_archive = st.file_uploader("📦 Upload ZIP or RAR Folder of Excel Files", type=["zip", "rar"])
