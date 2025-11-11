@@ -1,59 +1,50 @@
 import streamlit as st
 import pandas as pd
 
-st.title("Excel Parts Filter App")
-
-st.write("Upload two files: one reference file (master list) and one file to filter.")
+st.title("Excel Parts Filter Based on Matching Columns")
 
 # Upload files
-file1 = st.file_uploader("Upload reference Excel file (file 1)", type=["xlsx"])
-file2 = st.file_uploader("Upload file to be filtered (file 2)", type=["xlsx"])
+file1 = st.file_uploader("Upload reference Excel file (File 1)", type=["xlsx"])
+file2 = st.file_uploader("Upload file to be filtered (File 2)", type=["xlsx"])
 
 if file1 and file2:
-
     try:
-        # Read Excel files
-        df_ref = pd.read_excel(file1, dtype=str)
-        df_data = pd.read_excel(file2, dtype=str)
+        # Load data
+        df1 = pd.read_excel(file1, dtype=str)
+        df2 = pd.read_excel(file2, dtype=str)
 
-        st.write("✅ Files uploaded successfully")
+        st.write("✅ Files loaded successfully")
 
-        # Detect common part number column
-        part_col = None
-        possible_cols = ["PartNumber", "part", "PN", "PartNumberC", "PartNumberX"]
+        # Select columns
+        st.subheader("Step 1: Select matching columns in each file")
 
-        for col in df_ref.columns:
-            if col in possible_cols:
-                part_col = col
-                break
+        col1 = st.selectbox(
+            "Select Part Number Column from File 1",
+            df1.columns,
+            key="col1"
+        )
 
-        if not part_col:
-            st.error("❌ No part number column found in reference file")
-        else:
-            st.write(f"✅ Using part number column: **{part_col}**")
+        col2 = st.selectbox(
+            "Select Part Number Column from File 2",
+            df2.columns,
+            key="col2"
+        )
 
-            # Filter logic: keep rows where part exists in reference file
-            filtered_df = df_data[df_data[part_col].isin(df_ref[part_col])]
+        # Filter data
+        st.subheader("Step 2: Filter File 2 based on File 1 column values")
 
-            st.write("### ✅ Filtered Result")
-            st.dataframe(filtered_df)
+        filtered_df = df2[df2[col2].isin(df1[col1])]
 
-            # Download button
-            @st.cache_data
-            def convert_to_excel(df):
-                return df.to_excel(index=False, engine='xlsxwriter')
+        st.write("### ✅ Filtered Result:")
+        st.dataframe(filtered_df)
 
-            if st.button("Download filtered file"):
-                excel_file = filtered_df.to_excel("filtered_output.xlsx", index=False)
-                st.success("✅ File saved as filtered_output.xlsx")
-
-            # Alternative direct download
-            st.download_button(
-                label="⬇️ Download Filtered Excel",
-                data=filtered_df.to_excel(index=False),
-                file_name="filtered_output.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        # Download button
+        st.download_button(
+            label="⬇️ Download Filtered Excel File",
+            data=filtered_df.to_excel(index=False),
+            file_name="filtered_output.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     except Exception as e:
-        st.error(f"Error processing files: {e}")
+        st.error(f"Error: {e}")
