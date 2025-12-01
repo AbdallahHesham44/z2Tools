@@ -21,24 +21,7 @@ with tab1:
             for col in ['PartNumber', 'MaskedText']:
                 if col in df.columns:
                     df[col] = df[col].fillna('').astype(str).str.strip()
-            
-            # Don't strip trailing hyphens from MaskedText - keep original
-            # df['MaskedText'] = df['MaskedText'].str.rstrip('-')  # REMOVED
-            
-            # Add company filter if CompanyName column exists
-            if 'CompanyName' in df.columns:
-                df['CompanyName'] = df['CompanyName'].fillna('').astype(str).str.strip()
-                companies = ['All'] + sorted(df['CompanyName'].unique().tolist())
-                selected_company = st.selectbox("🏢 Filter by Company:", companies)
-                
-                if selected_company != 'All':
-                    df_filtered = df[df['CompanyName'] == selected_company].copy()
-                    st.info(f"Showing {len(df_filtered)} rows for {selected_company}")
-                else:
-                    df_filtered = df.copy()
-            else:
-                df_filtered = df.copy()
-                selected_company = 'All'
+            df['MaskedText'] = df['MaskedText'].str.rstrip('-')
             
             # Step 1: find first mismatch index
             def get_first_diff(part, masked):
@@ -58,95 +41,46 @@ with tab1:
                 masked_code = part[:idx]
                 return suffix, masked_code
             
-            # Process each company group separately
-            if 'CompanyName' in df.columns and selected_company == 'All':
-                # Process each company separately
-                result_dfs = []
-                for company in df['CompanyName'].unique():
-                    company_df = df[df['CompanyName'] == company].copy()
-                    
-                    company_df[['diff_char', 'masked_code']] = company_df.apply(
-                        lambda row: pd.Series(get_diff_and_masked_code(row['PartNumber'], row['MaskedText'])),
-                        axis=1
-                    )
-                    
-                    # Step 3: add length flag
-                    company_df['length'] = company_df.apply(
-                        lambda row: 'lengthIssue' if len(row['MaskedText']) > len(row['PartNumber']) else 'lengthApprove',
-                        axis=1
-                    )
-                    
-                    # Step 4: optional reconstruction - only for rows where no difference was initially found
-                    suffix_list = company_df.loc[company_df['diff_char'] != 'no_diff', 'diff_char'].dropna().unique().tolist()
-                    suffix_list = sorted(suffix_list, key=len, reverse=True)
-                    
-                    for suffix_item in suffix_list:
-                        if suffix_item:
-                            mask = (company_df['diff_char'] == 'no_diff') & (company_df['PartNumber'].str.endswith(suffix_item, na=False)) & (company_df['masked_code'] == '')
-                            if mask.any():
-                                company_df.loc[mask, 'masked_code'] = company_df.loc[mask, 'PartNumber'].str[:-len(suffix_item)]
-                                company_df.loc[mask, 'diff_char'] = suffix_item
-                    
-                    # Step 5: Add status column based on masked_code
-                    company_df['status'] = company_df['masked_code'].apply(lambda x: 'match' if x == '' else 'NotMatch')
-                    
-                    result_dfs.append(company_df)
-                
-                df_result = pd.concat(result_dfs, ignore_index=True)
-            else:
-                # Process filtered data
-                df_filtered[['diff_char', 'masked_code']] = df_filtered.apply(
-                    lambda row: pd.Series(get_diff_and_masked_code(row['PartNumber'], row['MaskedText'])),
-                    axis=1
-                )
-                
-                # Step 3: add length flag
-                df_filtered['length'] = df_filtered.apply(
-                    lambda row: 'lengthIssue' if len(row['MaskedText']) > len(row['PartNumber']) else 'lengthApprove',
-                    axis=1
-                )
-                
-                # Step 4: optional reconstruction
-                suffix_list = df_filtered.loc[df_filtered['diff_char'] != 'no_diff', 'diff_char'].dropna().unique().tolist()
-                suffix_list = sorted(suffix_list, key=len, reverse=True)
-                
-                for suffix_item in suffix_list:
-                    if suffix_item:
-                        mask = (df_filtered['diff_char'] == 'no_diff') & (df_filtered['PartNumber'].str.endswith(suffix_item, na=False)) & (df_filtered['masked_code'] == '')
-                        if mask.any():
-                            df_filtered.loc[mask, 'masked_code'] = df_filtered.loc[mask, 'PartNumber'].str[:-len(suffix_item)]
-                            df_filtered.loc[mask, 'diff_char'] = suffix_item
-                
-                # Step 5: Add status column
-                df_filtered['status'] = df_filtered['masked_code'].apply(lambda x: 'match' if x == '' else 'NotMatch')
-                df_result = df_filtered
+            df[['diff_char', 'masked_code']] = df.apply(
+                lambda row: pd.Series(get_diff_and_masked_code(row['PartNumber'], row['MaskedText'])),
+                axis=1
+            )
+            
+            # Step 3: add length flag
+            df['length'] = df.apply(
+                lambda row: 'lengthIssue' if len(row['MaskedText']) > len(row['PartNumber']) else 'lengthApprove',
+                axis=1
+            )
+            
+            # Step 4: optional reconstruction - only for rows where no difference was initially found
+            # Get unique suffixes from rows that had differences
+            suffix_list = df.loc[df['diff_char'] != 'no_diff', 'diff_char'].dropna().unique().tolist()
+            suffix_list = sorted(suffix_list, key=len, reverse=True)
+            
+            for suffix_item in suffix_list:
+                if suffix_item:
+                    # Only update rows where diff_char is 'no_diff' (no initial difference found)
+                    # AND the part ends with this suffix AND masked_code is currently empty
+                    mask = (df['diff_char'] == 'no_diff') & (df['PartNumber'].str.endswith(suffix_item, na=False)) & (df['masked_code'] == '')
+                    if mask.any():
+                        df.loc[mask, 'masked_code'] = df.loc[mask, 'PartNumber'].str[:-len(suffix_item)]
+                        df.loc[mask, 'diff_char'] = suffix_item
+            
+            # Step 5: Add status column based on masked_code
+            df['status'] = df['masked_code'].apply(lambda x: 'match' if x == '' else 'NotMatch')
             
             # Show preview
             st.subheader("📋 Differences Found")
-            display_cols = ['PartNumber', 'MaskedText', 'length', 'diff_char', 'masked_code', 'status']
-            if 'CompanyName' in df_result.columns:
-                display_cols = ['CompanyName'] + display_cols
-            st.dataframe(df_result[display_cols].head(20))
-            
-            # Show statistics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Rows", len(df_result))
-            with col2:
-                st.metric("Match", len(df_result[df_result['status'] == 'match']))
-            with col3:
-                st.metric("Not Match", len(df_result[df_result['status'] == 'NotMatch']))
+            st.dataframe(df[['PartNumber', 'MaskedText', 'length', 'diff_char', 'masked_code', 'status']].head(20))
             
             # Download results
             to_download = io.BytesIO()
-            df_result.to_excel(to_download, index=False)
+            df.to_excel(to_download, index=False)
             to_download.seek(0)
             st.download_button("📥 Download Results", to_download, file_name="part_diff_output.xlsx")
             
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
-            import traceback
-            st.error(traceback.format_exc())
     else:
         st.info("Please upload an Excel file to begin.")
 
