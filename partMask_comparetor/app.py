@@ -48,15 +48,17 @@ with tab1:
                         return i
                 return min_len  # no mismatch → return end
             
-            # Step 2: smarter diff_char + masked_code
+            # Step 2: smarter diff_char + masked_code + rule extraction
             def get_diff_and_masked_code(part, masked):
                 idx = get_first_diff(part, masked)
                 if idx >= len(part):
-                    return "no_diff", ""
+                    return "no_diff", "", "", ""
                 match = re.match(r"[A-Za-z]+", part[idx:])
                 suffix = match.group(0) if match else part[idx:]
                 masked_code = part[:idx]
-                return suffix, masked_code
+                rule = suffix  # The rule is the extracted suffix
+                applied_rule = masked_code + rule if masked_code else rule  # Apply rule back
+                return suffix, masked_code, rule, applied_rule
             
             # Process each company group separately
             if 'CompanyName' in df.columns and selected_company == 'All':
@@ -65,7 +67,7 @@ with tab1:
                 for company in df['CompanyName'].unique():
                     company_df = df[df['CompanyName'] == company].copy()
                     
-                    company_df[['diff_char', 'masked_code']] = company_df.apply(
+                    company_df[['diff_char', 'masked_code', 'rule', 'applied_rule']] = company_df.apply(
                         lambda row: pd.Series(get_diff_and_masked_code(row['PartNumber'], row['MaskedText'])),
                         axis=1
                     )
@@ -86,6 +88,8 @@ with tab1:
                             if mask.any():
                                 company_df.loc[mask, 'masked_code'] = company_df.loc[mask, 'PartNumber'].str[:-len(suffix_item)]
                                 company_df.loc[mask, 'diff_char'] = suffix_item
+                                company_df.loc[mask, 'rule'] = suffix_item
+                                company_df.loc[mask, 'applied_rule'] = company_df.loc[mask, 'masked_code'] + suffix_item
                     
                     # Step 5: Add status column based on masked_code
                     company_df['status'] = company_df['masked_code'].apply(lambda x: 'match' if x == '' else 'NotMatch')
@@ -95,7 +99,7 @@ with tab1:
                 df_result = pd.concat(result_dfs, ignore_index=True)
             else:
                 # Process filtered data
-                df_filtered[['diff_char', 'masked_code']] = df_filtered.apply(
+                df_filtered[['diff_char', 'masked_code', 'rule', 'applied_rule']] = df_filtered.apply(
                     lambda row: pd.Series(get_diff_and_masked_code(row['PartNumber'], row['MaskedText'])),
                     axis=1
                 )
@@ -116,6 +120,8 @@ with tab1:
                         if mask.any():
                             df_filtered.loc[mask, 'masked_code'] = df_filtered.loc[mask, 'PartNumber'].str[:-len(suffix_item)]
                             df_filtered.loc[mask, 'diff_char'] = suffix_item
+                            df_filtered.loc[mask, 'rule'] = suffix_item
+                            df_filtered.loc[mask, 'applied_rule'] = df_filtered.loc[mask, 'masked_code'] + suffix_item
                 
                 # Step 5: Add status column
                 df_filtered['status'] = df_filtered['masked_code'].apply(lambda x: 'match' if x == '' else 'NotMatch')
@@ -123,7 +129,7 @@ with tab1:
             
             # Show preview
             st.subheader("📋 Differences Found")
-            display_cols = ['PartNumber', 'MaskedText', 'length', 'diff_char', 'masked_code', 'status']
+            display_cols = ['PartNumber', 'MaskedText', 'length', 'diff_char', 'rule', 'applied_rule', 'masked_code', 'status']
             if 'CompanyName' in df_result.columns:
                 display_cols = ['CompanyName'] + display_cols
             st.dataframe(df_result[display_cols].head(20))
