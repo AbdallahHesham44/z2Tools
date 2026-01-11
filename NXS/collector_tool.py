@@ -6,7 +6,7 @@ import io
 # ---------------------------
 # CONFIG
 # ---------------------------
-IGNORE_SHEETS = ["Status", "Recipe"]
+IGNORE_SHEETS = ["Status", "Recipe","Intro"]
 
 st.set_page_config(page_title="Zip Excel Merger", layout="wide")
 st.title("📊 Merge Excel Files from ZIP (Multi-Sheet)")
