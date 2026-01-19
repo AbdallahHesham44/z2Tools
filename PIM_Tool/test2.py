@@ -27,7 +27,8 @@ REQUIRED_COLUMNS = ['Category', 'Sub-Category', 'Attribute Name', 'Preset values
 DRIVE_FILES = {
     "pattern_file": "https://docs.google.com/spreadsheets/d/1W4oA3BtsmWdNhSQOLceCFAfUiKE9BW1_/export?format=xlsx",
     # "preset_file": "https://docs.google.com/spreadsheets/d/1IhOFscHAvOH8erop8xg8HVWn6MMvMXvo/export?format=xlsx",
-    "preset_file": "https://docs.google.com/spreadsheets/d/1hrTL_ciligFN38mlFxt439UB3l9m4Dhh/export?format=xlsx",
+    # "preset_file": "https://docs.google.com/spreadsheets/d/1hrTL_ciligFN38mlFxt439UB3l9m4Dhh/export?format=xlsx",
+    "preset_file": "https://docs.google.com/spreadsheets/d/1vf-ab9PTerh1D2qw8LC-g94jjqLdLhIK/edit?usp=sharing&ouid=117756686149107163584&rtpof=true&sd=true",
     "isnumber_file": "https://docs.google.com/spreadsheets/d/1miXOKaln_uj5x52-vQmvqVtvKUKJuOnU/export?format=xlsx"
 }
 
