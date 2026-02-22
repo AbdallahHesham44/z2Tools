@@ -83,6 +83,34 @@ def search_pdf(pdf_url, part_number, family):
         "PartNumber_Matched": part_matched,
         "Family": family_found,
     }
+# =========================
+# DOWNLOAD TEMPLATE
+# =========================
+def generate_template():
+    template_df = pd.DataFrame(columns=[
+        "PartNumber",
+        "SupplierName",
+        "Family",
+        "Datasheet"
+    ])
+
+    output = io.BytesIO()
+    template_df.to_excel(output, index=False, engine="openpyxl")
+    output.seek(0)
+    return output
+
+st.subheader("📥 Download Excel Template")
+
+template_file = generate_template()
+
+st.download_button(
+    label="Download Template Excel",
+    data=template_file,
+    file_name="PN_Family_Template.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
+st.divider()
 
 # =========================
 # FILE UPLOAD
