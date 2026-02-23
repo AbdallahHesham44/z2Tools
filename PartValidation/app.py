@@ -37,17 +37,17 @@ def search_part_number(part_number, pdf_text_lower):
     if part_str.lower() in pdf_text_lower:
         return True, part_str
 
-    # 2. Remove suffix after '-' or '/'
-    if "-" in part_str or "/" in part_str:
-        stripped = re.split(r'[-/]', part_str)[0]
-        if stripped and stripped.lower() in pdf_text_lower:
-            return True, stripped
+    # # 2. Remove suffix after '-' or '/'
+    # if "-" in part_str or "/" in part_str:
+    #     stripped = re.split(r'[-/]', part_str)[0]
+    #     if stripped and stripped.lower() in pdf_text_lower:
+    #         return True, stripped
 
-    # 3. Remove last 3 characters
-    if len(part_str) > 3:
-        stripped_3 = part_str[:-3]
-        if stripped_3.lower() in pdf_text_lower:
-            return True, stripped_3
+    # # 3. Remove last 3 characters
+    # if len(part_str) > 3:
+    #     stripped_3 = part_str[:-3]
+    #     if stripped_3.lower() in pdf_text_lower:
+    #         return True, stripped_3
 
     return False, None
 
