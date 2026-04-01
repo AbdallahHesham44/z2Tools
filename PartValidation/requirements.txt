@@ -5,4 +5,11 @@ pdfplumber
 openpyxl
 python-Levenshtein
 fuzzywuzzy
+streamlit
+pandas
+requests
+pdfplumber
+fuzzywuzzy
+python-Levenshtein
+openpyxl
 
