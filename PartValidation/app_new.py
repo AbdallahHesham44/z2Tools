@@ -97,7 +97,7 @@ def process_row(row):
     part = row["PartNumber"]
     fam  = row["Family"]
 
-    if not isinstance(url, str) or not url.startswith("http"):
+    if not isinstance(url, str) or not url.startswith("http") or 'node' in url:
         return "FAIL", "INVALID_URL"
 
     pdf = download_pdf(url)
@@ -113,10 +113,12 @@ def process_row(row):
 
     if part_ok and fam_ok:
         return "PASS", "OK"
-    elif not part_ok:
-        return "FAIL", "NO_PART"
+    elif not part_ok and fam_ok :
+        return "FAIL", "NO_PART | found_family"
+    elif  part_ok and not fam_ok :
+        return "FAIL", "Found_PART | NO_family"
     else:
-        return "FAIL", "NO_FAMILY"
+        return "FAIL", "NO"
 
 # =========================
 # 🎨 UI
