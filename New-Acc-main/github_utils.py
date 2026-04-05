@@ -24,6 +24,7 @@ def download_mapping_file_from_github() -> pd.DataFrame:
     file_path = st.secrets["github"]["file_path"]  # e.g. "mapping.xlsx"
 
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
+    st.write("DEBUG URL:", url)
     print(f"URL is {url}")
     headers = {
         "Authorization": f"token {github_token}",
