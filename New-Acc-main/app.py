@@ -6,7 +6,6 @@
 #############################################
 
 import streamlit as st
-st.write("Current GitHub secrets:", st.secrets.get("github", {}))
 import pandas as pd
 import os
 import gc
@@ -50,21 +49,42 @@ MAPPING_FILENAME = "mapping.xlsx"
 # --- Initialize Mapping File ---
 # (Keep this section as is)
 if "mapping_df" not in st.session_state or st.session_state.get("mapping_df") is None:
-    st.write("DEBUG: mapping_df not in session state or is None. Attempting download...")
-    try:
-        mapping_data = download_mapping_file_from_github()
-        if mapping_data is not None:
-            st.session_state["mapping_df"] = mapping_data
-            save_mapping_to_disk(st.session_state["mapping_df"], MAPPING_FILENAME)
-            st.success("Mapping file downloaded and saved locally.")
-        else:
-             st.error("Failed to download mapping file (returned None). Cannot proceed.")
-             st.session_state["mapping_df"] = None
-             st.stop()
-    except Exception as e:
-        st.error(f"Error initializing mapping file from GitHub: {e}")
-        st.session_state["mapping_df"] = None
-        st.stop()
+    st.write("DEBUG: mapping_df not in session state or is None. Attempting load...")
+    mapping_data = None
+
+    github_config = st.secrets.get("github", {}) if hasattr(st, "secrets") else {}
+    github_config_valid = all(
+        github_config.get(key) for key in ["token", "owner", "repo", "file_path"]
+    )
+
+    if github_config_valid:
+        st.write("DEBUG: GitHub secrets appear configured, attempting download...")
+        try:
+            mapping_data = download_mapping_file_from_github()
+            if mapping_data is not None:
+                st.session_state["mapping_df"] = mapping_data
+                save_mapping_to_disk(st.session_state["mapping_df"], MAPPING_FILENAME)
+                st.success("Mapping file downloaded and saved locally from GitHub.")
+        except Exception as e:
+            st.warning(f"GitHub download failed: {e}")
+
+    if mapping_data is None:
+        st.write("DEBUG: Falling back to local mapping file.")
+        try:
+            if os.path.exists(MAPPING_FILENAME):
+                st.session_state["mapping_df"] = pd.read_excel(MAPPING_FILENAME)
+                st.warning("Loaded mapping file from local mapping.xlsx.")
+            else:
+                if not github_config_valid:
+                    st.error("GitHub secrets are not configured. Please add valid GitHub secrets or provide a local mapping.xlsx file.")
+                else:
+                    st.error("Failed to load mapping file from GitHub and local fallback mapping.xlsx does not exist.")
+                st.session_state["mapping_df"] = None
+                st.stop()
+        except Exception as e2:
+            st.error(f"Error loading local mapping file: {e2}")
+            st.session_state["mapping_df"] = None
+            st.stop()
 
 # --- Validate Mapping File (after potential download) ---
 # (Keep this section as is)

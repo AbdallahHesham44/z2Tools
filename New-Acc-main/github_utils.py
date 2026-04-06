@@ -11,20 +11,32 @@ import requests
 import os
 from io import BytesIO # Keep needed imports, even if also in other files
 
-# --- download_mapping_file_from_github() --- (No changes needed)
+
+def _get_github_config() -> dict:
+    github_config = st.secrets.get("github", {}) if hasattr(st, "secrets") else {}
+    required_keys = ["token", "owner", "repo", "file_path"]
+    if not all(github_config.get(key) for key in required_keys):
+        raise ValueError(
+            "GitHub secrets are not fully configured. "
+            "Please provide token, owner, repo, and file_path under [github]."
+        )
+    return github_config
+
+# --- download_mapping_file_from_github() ---
 def download_mapping_file_from_github() -> pd.DataFrame:
     """
     Downloads 'mapping.xlsx' from the GitHub repo specified in Streamlit secrets,
     returns a DataFrame parsed from that file.
     """
     st.write("DEBUG: Downloading mapping.xlsx from GitHub...")
-    github_token = st.secrets["github"]["token"]
-    owner = st.secrets["github"]["owner"]
-    repo = st.secrets["github"]["repo"]
-    file_path = st.secrets["github"]["file_path"]  # e.g. "mapping.xlsx"
+    github_config = _get_github_config()
+    github_token = github_config["token"]
+    owner = github_config["owner"]
+    repo = github_config["repo"]
+    file_path = github_config["file_path"]  # e.g. "mapping.xlsx"
 
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
-    url = url.replace(f"{repo}/", "")
+    # url = url.replace(f"{repo}/", "")  # Removed incorrect URL manipulation
     st.write("DEBUG URL:", url)
     print(f"URL is {url}")
     headers = {
@@ -53,7 +65,7 @@ def download_mapping_file_from_github() -> pd.DataFrame:
             # Clean up local file on error?
             # if os.path.exists(local_file):
             #      os.remove(local_file)
-            st.stop() # Stop execution if parsing fails
+            return None # Return None if parsing fails
 
         # Remove after successful read? Keep it for pipeline steps.
         # os.remove(local_file) # Keep local file temporarily for pipeline steps
@@ -61,10 +73,10 @@ def download_mapping_file_from_github() -> pd.DataFrame:
         return df
     elif response.status_code == 404:
          st.error(f"Failed to download file from GitHub: File not found at '{file_path}' (owner: {owner}, repo: {repo}).")
-         st.stop()
+         return None
     else:
         st.error(f"Failed to download file from GitHub: {response.status_code} {response.text}")
-        st.stop()
+        return None
 
 # --- update_mapping_file_on_github() --- (No changes needed)
 def update_mapping_file_on_github(mapping_df: pd.DataFrame) -> bool:
@@ -74,10 +86,11 @@ def update_mapping_file_on_github(mapping_df: pd.DataFrame) -> bool:
     st.write("DEBUG: Attempting to update mapping.xlsx on GitHub.")
     st.write("DEBUG: DataFrame shape before upload:", mapping_df.shape)
 
-    github_token = st.secrets["github"]["token"]
-    owner = st.secrets["github"]["owner"]
-    repo = st.secrets["github"]["repo"]
-    file_path = st.secrets["github"]["file_path"]
+    github_config = _get_github_config()
+    github_token = github_config["token"]
+    owner = github_config["owner"]
+    repo = github_config["repo"]
+    file_path = github_config["file_path"]
 
     # 1) Save DF to BytesIO buffer, then encode
     try:

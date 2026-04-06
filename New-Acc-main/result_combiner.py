@@ -783,7 +783,7 @@ def combine_results(processed_df: pd.DataFrame,
         
             attr_mask = df_final["Attribute"].astype(str) == "Value"
             flag_mask = df_final["ExceptionFlag"].astype(str).str.upper() == "YES"
-            types_mask = df_final["ExceptionTypes"].astype(str).apply(
+            types_mask = df_final["ExceptionTypes"].fillna("").astype(str).apply(
                 lambda x: [et.strip() for et in x.split(",") if et.strip()] == ["ThousandsSeparator"]
             )
         
