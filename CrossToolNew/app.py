@@ -166,8 +166,7 @@ def process_single_pl(pl_name, cross_df_pl, parametric_df, pakage_df, recipe_df)
     # YOUR ORIGINAL FUNCTION EXACTLY AS IS
     t0 = time.perf_counter()
     # ... [all your original logic]
-  """Process a single PL through the validation pipeline"""
-    t0 = time.perf_counter()
+    
 
     print(f"\n{'='*60}")
     print(f"Processing PL: {pl_name}")
