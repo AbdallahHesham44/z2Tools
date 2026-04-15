@@ -322,7 +322,7 @@ def merge_single_pl(pl_name, cross_df_pl, parametric_df, pakage_df, qualificatio
 def validate_single_pl(pl_name, merged_df, recipe_df, lookup_values, lookup_index):
     # YOUR ORIGINAL FUNCTION EXACTLY AS IS
     t0 = time.perf_counter()
-rules_subset = recipe_df[recipe_df["ZProductValue"].astype(str).str.strip() == pl_name]
+    rules_subset = recipe_df[recipe_df["ZProductValue"].astype(str).str.strip() == pl_name]
 
     rules_subset = rules_subset[
         (rules_subset["FeaturesType"].str.lower() == "core") |
