@@ -688,7 +688,7 @@ def validate_single_pl(pl_name, merged_df, recipe_df, lookup_values, lookup_inde
 def compare_parts(df, value, value2):
     # YOUR ORIGINAL FUNCTION EXACTLY AS IS
     # ... [all your original logic]
- """Compare two parts by AcceptedValue with Excel-style equality."""
+ 
     accepted_clean = df["AcceptedValue"].astype(str).str.strip().str.lower()
     value_clean = str(value).strip().lower()
     value2_clean = str(value2).strip().lower()
