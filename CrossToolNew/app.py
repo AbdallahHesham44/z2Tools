@@ -754,7 +754,7 @@ def compare_parts(df, value, value2):
 def determine_overall_grade(feature_grades, Auto, maxFlag, minFlag):
     # YOUR ORIGINAL FUNCTION EXACTLY AS IS
     # ... [all your original logic]
- """Determine overall grade based on feature grades and upgrade/downgrade flags."""
+ 
     critical_failures = {
         "DiffPinOut": "DiffPinOut",
         "DiffPKG": "Diff. Package",
