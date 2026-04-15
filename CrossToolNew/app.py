@@ -928,7 +928,7 @@ def organize_single_pl(cross_df_pl, validation_df_pl):
 def find_matching_row(df, part_value, company_value):
     # YOUR ORIGINAL FUNCTION EXACTLY AS IS
     # ... [all your original logic]
- df.columns = df.columns.str.strip()
+ 
     cols_lower = df.columns.str.lower()
 
     company_col = None
