@@ -101,9 +101,15 @@ if uploaded_file:
 
             base_row = group.loc[last_parametric_idx].copy()
 
+            # Get current display order
+            try:
+                current_display_order = int(base_row["DisplayOrder"])
+            except:
+                current_display_order = 0
+
             new_rows = []
 
-            for feature in features_to_add:
+            for feature_idx, feature in enumerate(features_to_add, start=1):
 
                 # Prevent duplication inside same PL
                 if feature in existing_features:
@@ -113,6 +119,9 @@ if uploaded_file:
 
                 new_row["FeatureName"] = feature
                 new_row["ProductFeatureName"] = feature
+
+                # Increment DisplayOrder
+                new_row["DisplayOrder"] = current_display_order + feature_idx
 
                 # Optional cleanup
                 new_row["Comment"] = None
