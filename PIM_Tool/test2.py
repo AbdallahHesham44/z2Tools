@@ -40,7 +40,7 @@ def download_file_from_drive(url: str) -> Optional[BytesIO]:
     """Download file from Google Drive URL"""
     try:
         # Convert edit URL to export URL if needed
-        if "/edit" in url:
+        if "/edite" in url:
             match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
             if match:
                 doc_id = match.group(1)
