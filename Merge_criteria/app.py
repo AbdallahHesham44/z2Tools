@@ -1,90 +1,139 @@
-# Streamlit App — Filter Multiple Excel Files From ZIP (Memory Optimized)
-
-# ```python
 import streamlit as st
 import pandas as pd
 import zipfile
 import io
-import os
-from tempfile import TemporaryDirectory
+import gc
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
 
-st.set_page_config(page_title="ZIP Excel Filter Tool", layout="wide")
+# =========================================================
+# PAGE CONFIG
+# =========================================================
+
+st.set_page_config(
+    page_title="ZIP Excel Filter Tool",
+    layout="wide"
+)
 
 st.title("📦 ZIP Excel Filter Tool")
-st.write("Upload a ZIP file containing Excel files and filter rows with custom criteria.")
+st.write("Upload ZIP file containing Excel files and filter rows.")
+
+# =========================================================
+# MEMORY SETTINGS
+# =========================================================
+
+MAX_ZIP_SIZE_MB = 200
 
 # =========================================================
 # HELPERS
 # =========================================================
 
-def read_excel_columns(excel_file):
-    """Read only headers to save memory"""
+def get_columns_from_excel(file_obj):
+    """
+    Read only few rows to get columns
+    """
     try:
-        df = pd.read_excel(excel_file, nrows=5)
+        df = pd.read_excel(
+            file_obj,
+            nrows=5,
+            dtype=str
+        )
+
         return df.columns.tolist()
-    except Exception:
+
+    except Exception as e:
+        st.error(f"Error reading columns: {e}")
         return []
 
 
-def process_excel(
-    excel_bytes,
+def process_excel_file(
+    file_obj,
     selected_columns,
     filter_column,
     filter_value,
-    required_equal_columns,
-    allowed_datadefinition_values,
+    equal_columns,
+    datadef_values
 ):
     """
-    Process one excel file with low memory usage
+    Process one Excel file with low memory usage
     """
 
     try:
-        # Read only selected columns
-        usecols = list(set(selected_columns + [filter_column] + required_equal_columns + ["DataDefinition"]))
+
+        # =========================================
+        # USECOLS TO REDUCE MEMORY
+        # =========================================
+
+        needed_columns = set(selected_columns)
+
+        if filter_column:
+            needed_columns.add(filter_column)
+
+        for c in equal_columns:
+            needed_columns.add(c)
+
+        needed_columns.add("DataDefinition")
+
+        # =========================================
+        # READ EXCEL
+        # =========================================
 
         df = pd.read_excel(
-            io.BytesIO(excel_bytes),
-            usecols=lambda x: x in usecols,
-            dtype=str,
+            file_obj,
+            usecols=lambda x: x in needed_columns,
+            dtype=str
         )
 
-        # Fill NaN
         df = df.fillna("")
 
         # =========================================
-        # FILTER MAIN COLUMN
+        # FILTER COLUMN
+        # Example:
+        # Is_Split == 10
         # =========================================
+
         if filter_column and filter_value != "":
-            df = df[df[filter_column].astype(str) == str(filter_value)]
+            df = df[
+                df[filter_column].astype(str)
+                == str(filter_value)
+            ]
 
         # =========================================
-        # CHECK EQUAL COLUMNS
+        # EQUAL COLUMNS
         # Example:
         # PartCount == CountRows
         # =========================================
-        if len(required_equal_columns) >= 2:
-            base_col = required_equal_columns[0]
 
-            for col in required_equal_columns[1:]:
+        if len(equal_columns) >= 2:
+
+            first_col = equal_columns[0]
+
+            for col in equal_columns[1:]:
+
                 df = df[
-                    df[base_col].astype(str)
+                    df[first_col].astype(str)
                     == df[col].astype(str)
                 ]
 
         # =========================================
-        # FILTER DataDefinition VALUES
+        # FILTER DataDefinition
         # =========================================
-        if allowed_datadefinition_values:
+
+        if datadef_values:
+
             if "DataDefinition" in df.columns:
+
                 df = df[
-                    df["DataDefinition"].isin(allowed_datadefinition_values)
+                    df["DataDefinition"].isin(datadef_values)
                 ]
 
         # =========================================
-        # KEEP ONLY SELECTED COLUMNS
+        # KEEP SELECTED COLUMNS ONLY
         # =========================================
+
         final_columns = [
-            c for c in selected_columns if c in df.columns
+            c for c in selected_columns
+            if c in df.columns
         ]
 
         df = df[final_columns]
@@ -92,59 +141,99 @@ def process_excel(
         return df
 
     except Exception as e:
-        return pd.DataFrame({"ERROR": [str(e)]})
+
+        return pd.DataFrame({
+            "ERROR": [str(e)]
+        })
 
 
 # =========================================================
-# UPLOAD ZIP
+# FILE UPLOAD
 # =========================================================
 
 uploaded_zip = st.file_uploader(
     "Upload ZIP File",
-    type=["zip"]
+    type=["zip"],
+    accept_multiple_files=False
 )
 
-if uploaded_zip:
+# =========================================================
+# MAIN
+# =========================================================
 
-    with TemporaryDirectory() as tmpdir:
+if uploaded_zip is not None:
 
-        zip_path = os.path.join(tmpdir, "uploaded.zip")
+    try:
 
-        with open(zip_path, "wb") as f:
-            f.write(uploaded_zip.read())
+        # =========================================
+        # CHECK FILE SIZE
+        # =========================================
 
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_size_mb = uploaded_zip.size / 1024 / 1024
+
+        st.info(f"ZIP Size: {zip_size_mb:.2f} MB")
+
+        if zip_size_mb > MAX_ZIP_SIZE_MB:
+
+            st.error(
+                f"ZIP too large. Max allowed: {MAX_ZIP_SIZE_MB} MB"
+            )
+
+            st.stop()
+
+        # =========================================
+        # OPEN ZIP
+        # =========================================
+
+        with zipfile.ZipFile(uploaded_zip) as zip_ref:
+
             excel_files = [
+
                 f for f in zip_ref.namelist()
-                if f.endswith('.xlsx') or f.endswith('.xls')
+
+                if (
+                    f.endswith(".xlsx")
+                    or f.endswith(".xls")
+                )
+
+                and not f.startswith("__MACOSX")
+
             ]
 
             if not excel_files:
-                st.error("No Excel files found inside ZIP")
+
+                st.error("No Excel files found in ZIP")
+
                 st.stop()
 
-            st.success(f"Found {len(excel_files)} Excel files")
+            st.success(
+                f"Found {len(excel_files)} Excel files"
+            )
 
             # =========================================
-            # READ FIRST FILE ONLY FOR COLUMNS
+            # GET COLUMNS FROM FIRST FILE
             # =========================================
-            first_excel = excel_files[0]
 
-            with zip_ref.open(first_excel) as f:
-                columns = read_excel_columns(f)
+            with zip_ref.open(excel_files[0]) as f:
+
+                columns = get_columns_from_excel(f)
 
             if not columns:
-                st.error("Could not read columns")
+
+                st.error("Could not detect columns")
+
                 st.stop()
 
             # =========================================
             # UI
             # =========================================
+
             st.subheader("⚙️ Filter Settings")
 
             col1, col2 = st.columns(2)
 
             with col1:
+
                 filter_column = st.selectbox(
                     "Filter Column",
                     columns
@@ -156,6 +245,7 @@ if uploaded_zip:
                 )
 
             with col2:
+
                 selected_columns = st.multiselect(
                     "Columns To Keep",
                     columns,
@@ -164,11 +254,14 @@ if uploaded_zip:
 
             st.subheader("🔄 Equal Columns Check")
 
-            required_equal_columns = st.multiselect(
-                "Columns That Must Have Same Value",
+            equal_columns = st.multiselect(
+                "Columns That Must Be Equal",
                 columns,
                 default=[
-                    c for c in ["PartCount", "CountRows"]
+                    c for c in [
+                        "PartCount",
+                        "CountRows"
+                    ]
                     if c in columns
                 ]
             )
@@ -180,107 +273,175 @@ if uploaded_zip:
                 value=""
             )
 
-            allowed_datadefinition_values = [
+            datadef_values = [
+
                 x.strip()
+
                 for x in datadef_text.splitlines()
+
                 if x.strip()
+
             ]
 
             # =========================================
-            # PROCESS
+            # PROCESS BUTTON
             # =========================================
+
             if st.button("🚀 Process Files"):
 
-                output_buffer = io.BytesIO()
+                progress = st.progress(0)
 
-                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                status = st.empty()
 
-                    progress = st.progress(0)
-                    status = st.empty()
+                # =========================================
+                # CREATE EXCEL WORKBOOK
+                # =========================================
 
-                    total_files = len(excel_files)
+                wb = Workbook()
 
-                    for idx, excel_name in enumerate(excel_files):
+                # Remove default sheet
+                default_sheet = wb.active
+                wb.remove(default_sheet)
 
-                        status.write(f"Processing: {excel_name}")
+                total_files = len(excel_files)
+
+                # =========================================
+                # PROCESS FILES
+                # =========================================
+
+                for idx, excel_name in enumerate(excel_files):
+
+                    status.write(
+                        f"Processing: {excel_name}"
+                    )
+
+                    try:
 
                         with zip_ref.open(excel_name) as f:
-                            excel_bytes = f.read()
 
-                        result_df = process_excel(
-                            excel_bytes=excel_bytes,
-                            selected_columns=selected_columns,
-                            filter_column=filter_column,
-                            filter_value=filter_value,
-                            required_equal_columns=required_equal_columns,
-                            allowed_datadefinition_values=allowed_datadefinition_values,
+                            # Read directly
+                            excel_buffer = io.BytesIO(
+                                f.read()
+                            )
+
+                            result_df = process_excel_file(
+                                file_obj=excel_buffer,
+                                selected_columns=selected_columns,
+                                filter_column=filter_column,
+                                filter_value=filter_value,
+                                equal_columns=equal_columns,
+                                datadef_values=datadef_values
+                            )
+
+                        # =========================================
+                        # CREATE SHEET
+                        # =========================================
+
+                        safe_sheet_name = (
+                            excel_name
+                            .split("/")[-1]
+                            [:31]
                         )
 
-                        # Limit sheet name length
-                        safe_sheet_name = os.path.basename(excel_name)[:31]
-
-                        result_df.to_excel(
-                            writer,
-                            sheet_name=safe_sheet_name,
-                            index=False
+                        ws = wb.create_sheet(
+                            title=safe_sheet_name
                         )
 
-                        progress.progress((idx + 1) / total_files)
+                        # =========================================
+                        # WRITE DATAFRAME
+                        # =========================================
 
-                output_buffer.seek(0)
+                        for row in dataframe_to_rows(
+                            result_df,
+                            index=False,
+                            header=True
+                        ):
+                            ws.append(row)
+
+                        # =========================================
+                        # CLEAN MEMORY
+                        # =========================================
+
+                        del result_df
+                        del excel_buffer
+
+                        gc.collect()
+
+                    except Exception as e:
+
+                        ws = wb.create_sheet(
+                            title=f"ERROR_{idx}"
+                        )
+
+                        ws.append(["ERROR"])
+                        ws.append([str(e)])
+
+                    progress.progress(
+                        (idx + 1) / total_files
+                    )
+
+                # =========================================
+                # SAVE OUTPUT
+                # =========================================
+
+                output = io.BytesIO()
+
+                wb.save(output)
+
+                output.seek(0)
+
+                gc.collect()
 
                 st.success("Processing Complete ✅")
 
                 st.download_button(
                     label="⬇️ Download Result Excel",
-                    data=output_buffer,
+                    data=output,
                     file_name="Filtered_Output.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
+    except Exception as e:
 
+        st.error(str(e))
 
 # =========================================================
-# MEMORY OPTIMIZATION NOTES
+# INFO
 # =========================================================
 
-st.markdown(r"""
+st.markdown("""
 ---
+## 🚀 Memory Optimized
 
-## 🚀 Memory Optimization Used
+This app is optimized for Streamlit Cloud 1GB RAM:
 
-This app is optimized for low RAM environments (1GB):
-
-- Reads only selected columns
 - Processes files one-by-one
-- Uses temporary directory
-- Does not keep all files in memory
-- Uses `dtype=str` to reduce mixed type issues
-- Reads only first file headers initially
+- Reads only needed columns
+- Uses low-memory mode
+- Cleans memory after each file
+- Does not merge all files in RAM
+- Uses openpyxl streaming
 
 ---
-
 ## ✅ Example Filters
 
 ### Example 1
 
 Filter:
-- `Is_Split = 10`
-- `PartCount == CountRows`
+- Is_Split = 10
+- PartCount == CountRows
 
 ### Example 2
 
 Allowed DataDefinition:
-
-    Resistor
-    Capacitor
-    Voltage
+- Resistor
+- Capacitor
+- Voltage
 
 ---
-
 ## ▶️ Run
 
-    pip install streamlit pandas openpyxl
-    streamlit run app.py
+pip install streamlit pandas openpyxl
 
+streamlit run app.py
 """)
