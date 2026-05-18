@@ -239,11 +239,12 @@ if uploaded_zip:
                 )
 
 
+
 # =========================================================
 # MEMORY OPTIMIZATION NOTES
 # =========================================================
 
-st.markdown("""
+st.markdown(r"""
 ---
 
 ## 🚀 Memory Optimization Used
@@ -271,36 +272,15 @@ Filter:
 
 Allowed DataDefinition:
 
-```
-
-Resistor
-Capacitor
-Voltage
-
-````
+    Resistor
+    Capacitor
+    Voltage
 
 ---
 
 ## ▶️ Run
 
-```bash
-pip install streamlit pandas openpyxl
-streamlit run app.py
-````
+    pip install streamlit pandas openpyxl
+    streamlit run app.py
 
 """)
-
-```
-
-## Features Included
-
-- Upload ZIP file
-- Reads all Excel files inside ZIP
-- Select columns to keep
-- Filter by any column/value
-- Compare columns equality
-- Filter DataDefinition values
-- Export ONE Excel file with multiple sheets
-- Memory optimized for Streamlit Cloud / 1GB RAM
-
-```
