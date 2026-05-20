@@ -5,3 +5,11 @@ pandas
 tqdm
 gdown
 PyDrive2
+xlrd
+# requirements.txt
+
+
+
+requests
+pdfplumber
+pyngrok
