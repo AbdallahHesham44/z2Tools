@@ -297,21 +297,112 @@ if uploaded_input is not None:
                         detailed_df,
                         "detailed_analysis.xlsx",
                         "⬇️ Download Detailed Analysis"
-                    )
+                                        )
+                    # =========================
+# STEP 5 - COMBINE RESULTS
+# =========================
+st.info("Combining results...")
 
-                # -------------------------
-                # FINAL REPORT
-                # -------------------------
-                with tab4:
-                    final_df = pd.read_excel(final_xlsx)
+final_xlsx = os.path.join(
+    workdir,
+    "final_combined.xlsx"
+)
 
-                    st.dataframe(final_df.head(100))
+combined_ok = combine_results(
+    processed_df=df_fixed,
+    analysis_file=detailed_xlsx,
+    output_file=final_xlsx
+)
 
-                    dataframe_download_button(
-                        final_df,
-                        "final_combined.xlsx",
-                        "⬇️ Download Final Report"
-                    )
+# Debug
+st.write("Detailed file exists:", os.path.exists(detailed_xlsx))
+st.write("Fixed DF shape:", df_fixed.shape)
 
-            except Exception as e:
-                st.exception(e)
+# Check final file
+if not os.path.exists(final_xlsx):
+    st.error("Final combined file was not created.")
+
+    st.write("Possible reasons:")
+    st.write("- combine_results failed")
+    st.write("- detailed analysis file missing")
+    st.write("- invalid dataframe")
+    st.write("- exception inside combine_results")
+
+else:
+    st.success("Final report created successfully.")
+
+# =========================
+# DISPLAY RESULTS
+# =========================
+st.header("✅ Pipeline Completed")
+
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Preprocessed",
+    "Fixed Output",
+    "Detailed Analysis",
+    "Final Report"
+])
+
+# -------------------------
+# PREPROCESSED
+# -------------------------
+with tab1:
+    st.dataframe(df_pre.head(100))
+
+    dataframe_download_button(
+        df_pre,
+        "preprocessed.xlsx",
+        "⬇️ Download Preprocessed"
+    )
+
+# -------------------------
+# FIXED OUTPUT
+# -------------------------
+with tab2:
+    st.dataframe(df_fixed.head(100))
+
+    dataframe_download_button(
+        df_fixed,
+        "fixed_output.xlsx",
+        "⬇️ Download Fixed Output"
+    )
+
+# -------------------------
+# DETAILED ANALYSIS
+# -------------------------
+with tab3:
+
+    if os.path.exists(detailed_xlsx):
+
+        detailed_df = pd.read_excel(detailed_xlsx)
+
+        st.dataframe(detailed_df.head(100))
+
+        dataframe_download_button(
+            detailed_df,
+            "detailed_analysis.xlsx",
+            "⬇️ Download Detailed Analysis"
+        )
+
+    else:
+        st.warning("Detailed analysis file not found.")
+
+# -------------------------
+# FINAL REPORT
+# -------------------------
+with tab4:
+
+    if os.path.exists(final_xlsx):
+
+        final_df = pd.read_excel(final_xlsx)
+
+        st.dataframe(final_df.head(100))
+
+        dataframe_download_button(
+            final_df,
+            "final_combined.xlsx",
+            "⬇️ Download Final Report"
+        )
+
+    else:
+        st.warning("Final report file not found.")
