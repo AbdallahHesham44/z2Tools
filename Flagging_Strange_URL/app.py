@@ -3,34 +3,38 @@ import re
 from urllib.parse import urlparse, unquote
 
 import pandas as pd
+import requests
 import streamlit as st
+from pypdf import PdfReader
 
-
-GENERIC_PDF_RE = re.compile(r"^pdf\s*file[_-]?\d+\.pdf$|^pdffile[_-]?\d+\.pdf$", re.IGNORECASE)
+GENERIC_PDF_RE = re.compile(
+    r"^pdf\s*file[_-]?\d+\.pdf$|^pdffile[_-]?\d+\.pdf$",
+    re.IGNORECASE,
+)
 
 
 def extract_filename(value: object) -> str:
-    """Return the PDF/file name from a Local URL cell."""
     if pd.isna(value):
         return ""
-
     text = str(value).strip()
     if not text:
         return ""
-
     parsed = urlparse(text)
     path = parsed.path if parsed.path else text
-    filename = path.rstrip("/").split("/")[-1]
-    return unquote(filename).strip()
+    return unquote(path.rstrip("/").split("/")[-1]).strip()
+
+
+def normalize_text(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    text = unquote(str(value)).lower().strip()
+    return re.sub(r"[^a-z0-9]+", "", text)
 
 
 def is_generic_pdf_filename(filename: str) -> bool:
-    """Detect strange generic names like PdfFile212651.pdf or PdfFile_232283.pdf."""
     if not filename:
         return False
-
-    compact = filename.replace(" ", "")
-    return bool(GENERIC_PDF_RE.match(compact))
+    return bool(GENERIC_PDF_RE.match(filename.replace(" ", "")))
 
 
 def flag_reason(local_url: object) -> str:
@@ -40,44 +44,114 @@ def flag_reason(local_url: object) -> str:
     return ""
 
 
-def process_workbook(uploaded_file) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame], int]:
-    """
-    Reads all sheets. For every sheet that contains Local URL, inserts URL Flag
-    immediately beside it. Returns original sheets, processed sheets, flag count.
-    """
-    original_sheets = pd.read_excel(uploaded_file, sheet_name=None)
-    processed_sheets = {}
-    total_flags = 0
+@st.cache_data(show_spinner=False, ttl=3600)
+def download_and_extract_pdf_text(url: str, timeout: int = 30) -> tuple[str, str]:
+    """Return (text, status). Status is used in the output sheet for troubleshooting."""
+    if not url or not str(url).lower().startswith(("http://", "https://")):
+        return "", "Skipped: not a URL"
 
-    for sheet_name, df in original_sheets.items():
+    try:
+        response = requests.get(str(url), timeout=timeout)
+        response.raise_for_status()
+    except Exception as exc:
+        return "", f"Download error: {exc}"
+
+    content_type = response.headers.get("content-type", "").lower()
+    if "pdf" not in content_type and not str(url).lower().split("?")[0].endswith(".pdf"):
+        return "", f"Skipped: not PDF ({content_type or 'unknown content type'})"
+
+    try:
+        reader = PdfReader(io.BytesIO(response.content))
+        pages_text = []
+        for page in reader.pages:
+            pages_text.append(page.extract_text() or "")
+        text = "\n".join(pages_text)
+        if not text.strip():
+            return "", "PDF text empty or scanned image"
+        return text, "PDF text extracted"
+    except Exception as exc:
+        return "", f"PDF parse error: {exc}"
+
+
+def family_match_result(family_name: object, local_url: object, search_pdf_text: bool) -> tuple[str, str, str]:
+    """Return (Yes/No, source, status)."""
+    family_normalized = normalize_text(family_name)
+    if not family_normalized:
+        return "No", "", "Missing FamilyName"
+
+    url_normalized = normalize_text(local_url)
+    if url_normalized and family_normalized in url_normalized:
+        return "Yes", "Local URL", "Matched URL text"
+
+    if not search_pdf_text:
+        return "No", "", "Not found in URL text"
+
+    pdf_text, status = download_and_extract_pdf_text(str(local_url).strip())
+    pdf_normalized = normalize_text(pdf_text)
+    if pdf_normalized and family_normalized in pdf_normalized:
+        return "Yes", "PDF content", status
+
+    return "No", "", status if status else "Not found"
+
+
+def process_workbook(uploaded_file, search_pdf_text: bool) -> tuple[dict[str, pd.DataFrame], int, int]:
+    sheets = pd.read_excel(uploaded_file, sheet_name=None)
+    processed_sheets = {}
+    total_url_flags = 0
+    total_family_yes = 0
+
+    generated_columns = [
+        "URL Flag",
+        "FamilyName Found",
+        "FamilyName Match Source",
+        "FamilyName Check Status",
+        "FamilyName Found in Local URL",
+    ]
+
+    for sheet_name, df in sheets.items():
         processed = df.copy()
+        drop_cols = [col for col in generated_columns if col in processed.columns]
+        if drop_cols:
+            processed = processed.drop(columns=drop_cols)
 
         if "Local URL" in processed.columns:
-            local_url_position = processed.columns.get_loc("Local URL")
-
-            # Remove old flag column if user re-uploads an already flagged file.
-            if "URL Flag" in processed.columns:
-                processed = processed.drop(columns=["URL Flag"])
-                local_url_position = processed.columns.get_loc("Local URL")
-
+            local_pos = processed.columns.get_loc("Local URL")
             flags = processed["Local URL"].apply(flag_reason)
-            total_flags += int((flags != "").sum())
+            total_url_flags += int((flags != "").sum())
+            processed.insert(local_pos + 1, "URL Flag", flags)
 
-            processed.insert(local_url_position + 1, "URL Flag", flags)
+            if "FamilyName" in processed.columns:
+                results = processed.apply(
+                    lambda row: family_match_result(row["FamilyName"], row["Local URL"], search_pdf_text),
+                    axis=1,
+                    result_type="expand",
+                )
+                results.columns = ["FamilyName Found", "FamilyName Match Source", "FamilyName Check Status"]
+                total_family_yes += int((results["FamilyName Found"] == "Yes").sum())
+                insert_pos = processed.columns.get_loc("URL Flag") + 1
+                for offset, col in enumerate(results.columns):
+                    processed.insert(insert_pos + offset, col, results[col])
 
         processed_sheets[sheet_name] = processed
 
-    return original_sheets, processed_sheets, total_flags
+    return processed_sheets, total_url_flags, total_family_yes
 
 
 def to_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        used_sheet_names = set()
         for sheet_name, df in sheets.items():
-            # Excel sheet names are limited to 31 chars.
-            safe_sheet_name = str(sheet_name)[:31]
-            df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
+            base_name = str(sheet_name)[:31] or "Sheet"
+            safe_sheet_name = base_name
+            counter = 1
+            while safe_sheet_name in used_sheet_names:
+                suffix = f"_{counter}"
+                safe_sheet_name = f"{base_name[:31 - len(suffix)]}{suffix}"
+                counter += 1
+            used_sheet_names.add(safe_sheet_name)
 
+            df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
             worksheet = writer.sheets[safe_sheet_name]
             for column_cells in worksheet.columns:
                 max_length = 0
@@ -85,54 +159,60 @@ def to_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
                 for cell in column_cells:
                     value = "" if cell.value is None else str(cell.value)
                     max_length = max(max_length, len(value))
-                worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 55)
-
+                worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 65)
     return output.getvalue()
 
 
-st.set_page_config(page_title="Local URL Datasheet Flagger", page_icon="📄", layout="wide")
-
-st.title("Local URL Datasheet Flagger")
+st.set_page_config(page_title="Local URL + PDF FamilyName Checker", page_icon="📄", layout="wide")
+st.title("Local URL + PDF FamilyName Checker")
 st.write(
-    "Upload an Excel file. The app finds the `Local URL` column, detects generic PDF filenames "
-    "such as `PdfFile212651.pdf` or `PdfFile_232283.pdf`, adds `URL Flag` beside it, "
-    "and lets you download the updated workbook."
+    "Upload an Excel file. The app flags generic PDF filenames, then checks whether `FamilyName` "
+    "exists in the Local URL text and, optionally, inside the PDF content behind each Local URL."
 )
+
+search_pdf_text = st.checkbox(
+    "Also download each PDF and search inside PDF content",
+    value=True,
+    help="Use this when the PDF file name is generic, for example PdfFile_180482.pdf. This is slower but more accurate.",
+)
+
+with st.expander("How the FamilyName check works"):
+    st.write(
+        "First, the app checks whether `FamilyName` appears in the URL text itself. "
+        "If not, and PDF-content checking is enabled, it downloads the PDF, extracts text, "
+        "and searches the PDF content. The result column is `FamilyName Found` with Yes or No."
+    )
 
 uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx", "xls"])
 
 if uploaded_file is not None:
     try:
-        original_sheets, processed_sheets, total_flags = process_workbook(uploaded_file)
+        with st.spinner("Processing workbook..."):
+            processed_sheets, total_url_flags, total_family_yes = process_workbook(uploaded_file, search_pdf_text)
 
-        st.success(f"Done. Found {total_flags} strange Local URL value(s).")
+        st.success(
+            f"Done. Found {total_url_flags} generic Local URL filename(s). "
+            f"Found FamilyName in {total_family_yes} row(s)."
+        )
 
-        sheet_names_with_local_url = [
-            name for name, df in processed_sheets.items() if "Local URL" in df.columns
-        ]
-
+        sheet_names_with_local_url = [name for name, df in processed_sheets.items() if "Local URL" in df.columns]
         if not sheet_names_with_local_url:
             st.warning("No column named `Local URL` was found in this workbook.")
         else:
             selected_sheet = st.selectbox("Preview sheet", sheet_names_with_local_url)
             preview_df = processed_sheets[selected_sheet]
+            local_pos = preview_df.columns.get_loc("Local URL")
+            preview_cols = preview_df.columns[max(0, local_pos - 4): min(len(preview_df.columns), local_pos + 8)]
+            st.dataframe(preview_df.loc[:, preview_cols], use_container_width=True)
 
-            local_url_position = preview_df.columns.get_loc("Local URL")
-            preview_columns = preview_df.columns[
-                max(0, local_url_position - 3): min(len(preview_df.columns), local_url_position + 5)
-            ]
-            st.dataframe(preview_df.loc[:, preview_columns], use_container_width=True)
-
-            flagged_rows = preview_df[preview_df["URL Flag"] != ""]
-            if not flagged_rows.empty:
-                st.subheader("Flagged rows")
-                st.dataframe(flagged_rows.loc[:, preview_columns], use_container_width=True)
+            if "FamilyName Found" in preview_df.columns:
+                st.subheader("Rows where FamilyName was found")
+                st.dataframe(preview_df[preview_df["FamilyName Found"] == "Yes"].loc[:, preview_cols], use_container_width=True)
 
         excel_bytes = to_excel_bytes(processed_sheets)
-        output_name = uploaded_file.name.rsplit(".", 1)[0] + "_flagged.xlsx"
-
+        output_name = uploaded_file.name.rsplit(".", 1)[0] + "_pdf_content_checked.xlsx"
         st.download_button(
-            label="Download flagged Excel file",
+            label="Download checked Excel file",
             data=excel_bytes,
             file_name=output_name,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
