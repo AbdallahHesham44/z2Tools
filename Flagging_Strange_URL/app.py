@@ -12,6 +12,19 @@ GENERIC_PDF_RE = re.compile(
     re.IGNORECASE,
 )
 
+GENERATED_COLUMNS = [
+    "URL Flag",
+    "FamilyName Found",
+    "FamilyName Match Source",
+    "FamilyName Check Status",
+    "Same Family Local Count",
+    "Same Family Locals",
+    "Same Local Family Count",
+    "Families Sharing Same Local",
+    "Local Family Relation Status",
+    "FamilyName Found in Local URL",
+]
+
 
 def extract_filename(value: object) -> str:
     if pd.isna(value):
@@ -24,11 +37,21 @@ def extract_filename(value: object) -> str:
     return unquote(path.rstrip("/").split("/")[-1]).strip()
 
 
+def clean_display(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
 def normalize_text(value: object) -> str:
     if pd.isna(value):
         return ""
     text = unquote(str(value)).lower().strip()
     return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def normalize_key(value: object) -> str:
+    return normalize_text(value)
 
 
 def is_generic_pdf_filename(filename: str) -> bool:
@@ -94,23 +117,113 @@ def family_match_result(family_name: object, local_url: object, search_pdf_text:
     return "No", "", status if status else "Not found"
 
 
-def process_workbook(uploaded_file, search_pdf_text: bool) -> tuple[dict[str, pd.DataFrame], int, int]:
+def unique_join(values: list[str]) -> str:
+    seen = set()
+    output = []
+    for value in values:
+        text = clean_display(value)
+        if not text:
+            continue
+        key = text.lower()
+        if key not in seen:
+            seen.add(key)
+            output.append(text)
+    return "\n".join(output)
+
+
+def add_family_local_relations(processed: pd.DataFrame) -> pd.DataFrame:
+    """Add relation columns between FamilyName and Local URL.
+
+    Same Family Local Count / Same Family Locals:
+        For each FamilyName, show all unique Local URLs used by that family.
+
+    Same Local Family Count / Families Sharing Same Local:
+        For each Local URL, show all unique FamilyName values using that same local.
+        This helps detect when one PDF is reused across different families.
+    """
+    if "FamilyName" not in processed.columns or "Local URL" not in processed.columns:
+        return processed
+
+    df = processed.copy()
+    family_keys = df["FamilyName"].apply(normalize_key)
+    local_keys = df["Local URL"].apply(normalize_key)
+
+    family_to_locals: dict[str, list[str]] = {}
+    local_to_families: dict[str, list[str]] = {}
+
+    for idx, row in df.iterrows():
+        family_key = family_keys.loc[idx]
+        local_key = local_keys.loc[idx]
+        family_display = clean_display(row["FamilyName"])
+        local_display = clean_display(row["Local URL"])
+
+        if family_key and local_display:
+            family_to_locals.setdefault(family_key, []).append(local_display)
+        if local_key and family_display:
+            local_to_families.setdefault(local_key, []).append(family_display)
+
+    same_family_local_count = []
+    same_family_locals = []
+    same_local_family_count = []
+    families_sharing_same_local = []
+    relation_status = []
+
+    for idx, row in df.iterrows():
+        family_key = family_keys.loc[idx]
+        local_key = local_keys.loc[idx]
+
+        family_locals_text = unique_join(family_to_locals.get(family_key, []))
+        local_families_text = unique_join(local_to_families.get(local_key, []))
+
+        family_local_count = len([x for x in family_locals_text.split("\n") if x.strip()])
+        local_family_count = len([x for x in local_families_text.split("\n") if x.strip()])
+
+        same_family_local_count.append(family_local_count)
+        same_family_locals.append(family_locals_text)
+        same_local_family_count.append(local_family_count)
+        families_sharing_same_local.append(local_families_text)
+
+        if not family_key:
+            relation_status.append("Missing FamilyName")
+        elif not local_key:
+            relation_status.append("Missing Local URL")
+        elif local_family_count > 1:
+            relation_status.append("CHECK: same Local URL is used by multiple families")
+        elif family_local_count > 1:
+            relation_status.append("Same family has multiple Local URLs")
+        else:
+            relation_status.append("Single Local URL for this family")
+
+    insert_after = "FamilyName Check Status" if "FamilyName Check Status" in df.columns else "Local URL"
+    insert_pos = df.columns.get_loc(insert_after) + 1
+    relation_cols = pd.DataFrame(
+        {
+            "Same Family Local Count": same_family_local_count,
+            "Same Family Locals": same_family_locals,
+            "Same Local Family Count": same_local_family_count,
+            "Families Sharing Same Local": families_sharing_same_local,
+            "Local Family Relation Status": relation_status,
+        }
+    )
+
+    for offset, col in enumerate(relation_cols.columns):
+        if col in df.columns:
+            df = df.drop(columns=[col])
+        df.insert(insert_pos + offset, col, relation_cols[col])
+
+    return df
+
+
+def process_workbook(uploaded_file, search_pdf_text: bool, add_relations: bool) -> tuple[dict[str, pd.DataFrame], int, int, int]:
     sheets = pd.read_excel(uploaded_file, sheet_name=None)
     processed_sheets = {}
     total_url_flags = 0
     total_family_yes = 0
-
-    generated_columns = [
-        "URL Flag",
-        "FamilyName Found",
-        "FamilyName Match Source",
-        "FamilyName Check Status",
-        "FamilyName Found in Local URL",
-    ]
+    total_shared_local_issues = 0
 
     for sheet_name, df in sheets.items():
         processed = df.copy()
-        drop_cols = [col for col in generated_columns if col in processed.columns]
+        drop_cols = [col for col in GENERATED_COLUMNS if col in processed.columns]
         if drop_cols:
             processed = processed.drop(columns=drop_cols)
 
@@ -132,9 +245,18 @@ def process_workbook(uploaded_file, search_pdf_text: bool) -> tuple[dict[str, pd
                 for offset, col in enumerate(results.columns):
                     processed.insert(insert_pos + offset, col, results[col])
 
+                if add_relations:
+                    processed = add_family_local_relations(processed)
+                    if "Local Family Relation Status" in processed.columns:
+                        total_shared_local_issues += int(
+                            processed["Local Family Relation Status"].eq(
+                                "CHECK: same Local URL is used by multiple families"
+                            ).sum()
+                        )
+
         processed_sheets[sheet_name] = processed
 
-    return processed_sheets, total_url_flags, total_family_yes
+    return processed_sheets, total_url_flags, total_family_yes, total_shared_local_issues
 
 
 def to_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
@@ -159,15 +281,16 @@ def to_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
                 for cell in column_cells:
                     value = "" if cell.value is None else str(cell.value)
                     max_length = max(max_length, len(value))
-                worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 65)
+                worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 70)
+            worksheet.freeze_panes = "A2"
     return output.getvalue()
 
 
-st.set_page_config(page_title="Local URL + PDF FamilyName Checker", page_icon="📄", layout="wide")
-st.title("Local URL + PDF FamilyName Checker")
+st.set_page_config(page_title="Local URL + Family Relation Checker", page_icon="📄", layout="wide")
+st.title("Local URL + PDF FamilyName + Relation Checker")
 st.write(
-    "Upload an Excel file. The app flags generic PDF filenames, then checks whether `FamilyName` "
-    "exists in the Local URL text and, optionally, inside the PDF content behind each Local URL."
+    "Upload an Excel file. The app flags generic PDF filenames, checks whether `FamilyName` "
+    "exists in the URL/PDF content, and maps relations between Local URLs and FamilyName values."
 )
 
 search_pdf_text = st.checkbox(
@@ -176,11 +299,17 @@ search_pdf_text = st.checkbox(
     help="Use this when the PDF file name is generic, for example PdfFile_180482.pdf. This is slower but more accurate.",
 )
 
-with st.expander("How the FamilyName check works"):
+add_relations = st.checkbox(
+    "Add relation columns between FamilyName and Local URL",
+    value=True,
+    help="Groups all Local URLs used by the same FamilyName and all FamilyName values sharing the same Local URL.",
+)
+
+with st.expander("How the relation check works"):
     st.write(
-        "First, the app checks whether `FamilyName` appears in the URL text itself. "
-        "If not, and PDF-content checking is enabled, it downloads the PDF, extracts text, "
-        "and searches the PDF content. The result column is `FamilyName Found` with Yes or No."
+        "For every row, the app groups by `FamilyName` and lists all unique `Local URL` values used by that family. "
+        "It also groups by `Local URL` and lists all unique families using the same local. "
+        "If one Local URL is used by multiple families, the row is marked as `CHECK: same Local URL is used by multiple families`."
     )
 
 uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx", "xls"])
@@ -188,11 +317,16 @@ uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx", "xls"])
 if uploaded_file is not None:
     try:
         with st.spinner("Processing workbook..."):
-            processed_sheets, total_url_flags, total_family_yes = process_workbook(uploaded_file, search_pdf_text)
+            processed_sheets, total_url_flags, total_family_yes, total_shared_local_issues = process_workbook(
+                uploaded_file,
+                search_pdf_text,
+                add_relations,
+            )
 
         st.success(
             f"Done. Found {total_url_flags} generic Local URL filename(s). "
-            f"Found FamilyName in {total_family_yes} row(s)."
+            f"Found FamilyName in {total_family_yes} row(s). "
+            f"Found {total_shared_local_issues} row(s) where one Local URL is shared by multiple families."
         )
 
         sheet_names_with_local_url = [name for name, df in processed_sheets.items() if "Local URL" in df.columns]
@@ -202,15 +336,18 @@ if uploaded_file is not None:
             selected_sheet = st.selectbox("Preview sheet", sheet_names_with_local_url)
             preview_df = processed_sheets[selected_sheet]
             local_pos = preview_df.columns.get_loc("Local URL")
-            preview_cols = preview_df.columns[max(0, local_pos - 4): min(len(preview_df.columns), local_pos + 8)]
+            preview_cols = preview_df.columns[max(0, local_pos - 4): min(len(preview_df.columns), local_pos + 14)]
             st.dataframe(preview_df.loc[:, preview_cols], use_container_width=True)
 
-            if "FamilyName Found" in preview_df.columns:
-                st.subheader("Rows where FamilyName was found")
-                st.dataframe(preview_df[preview_df["FamilyName Found"] == "Yes"].loc[:, preview_cols], use_container_width=True)
+            if "Local Family Relation Status" in preview_df.columns:
+                st.subheader("Rows needing relation check")
+                flagged_relation_df = preview_df[
+                    preview_df["Local Family Relation Status"].str.startswith("CHECK", na=False)
+                ]
+                st.dataframe(flagged_relation_df.loc[:, preview_cols], use_container_width=True)
 
         excel_bytes = to_excel_bytes(processed_sheets)
-        output_name = uploaded_file.name.rsplit(".", 1)[0] + "_pdf_content_checked.xlsx"
+        output_name = uploaded_file.name.rsplit(".", 1)[0] + "_family_relation_checked.xlsx"
         st.download_button(
             label="Download checked Excel file",
             data=excel_bytes,
