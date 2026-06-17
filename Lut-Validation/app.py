@@ -147,7 +147,7 @@ with tab1:
     
             except Exception as e:
                 st.error(f"❌ Error: {e}")
-    with tab2:
+with tab2:
 
     st.subheader("Download Templates")
 
