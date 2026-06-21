@@ -783,9 +783,17 @@ def combine_results(processed_df: pd.DataFrame,
         
             attr_mask = df_final["Attribute"].astype(str) == "Value"
             flag_mask = df_final["ExceptionFlag"].astype(str).str.upper() == "YES"
-            types_mask = df_final["ExceptionTypes"].astype(str).apply(
-                lambda x: [et.strip() for et in x.split(",") if et.strip()] == ["ThousandsSeparator"]
-            )
+            # types_mask = df_final["ExceptionTypes"].astype(str).apply( #Make change hereeeeeee
+            #     lambda x: [et.strip() for et in x.split(",") if et.strip()] == ["ThousandsSeparator"]
+            # )
+            def _is_thousands_separator_only(value) -> bool:
+                # Be defensive with mixed/dirty types in ExceptionTypes (e.g. float/NaN).
+                if pd.isna(value):
+                    return False
+                parsed = [et.strip() for et in str(value).split(",") if et.strip()]
+                return parsed == ["ThousandsSeparator"]
+ 
+            types_mask = df_final["ExceptionTypes"].apply(_is_thousands_separator_only)
         
             target_rows = df_final[attr_mask & flag_mask & types_mask].index
         
