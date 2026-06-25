@@ -545,9 +545,9 @@ def main():
         page_icon="📊",
         layout="wide"
     )
-    if st.button("🔄 Refresh Reference Files"):
-        st.cache_data.clear()
-        st.rerun()
+    # if st.button("🔄 Refresh Reference Files"):
+    #     st.cache_data.clear()
+    #     st.rerun()
     
     st.title("📊 Data Processing and Comparison Tool")
     st.markdown("Upload your Excel file and let the system process it against reference data from Google Drive.")
