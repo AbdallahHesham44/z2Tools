@@ -1,0 +1,11 @@
+streamlit
+pandas
+openpyxl
+xlsxwriter
+beautifulsoup4
+pikepdf
+requests
+fuzzywuzzy[speedup]
+tqdm
+python-Levenshtein
+pymupdf
