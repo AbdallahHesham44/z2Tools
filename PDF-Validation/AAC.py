@@ -507,7 +507,7 @@ def run_checker(input_excel_bytes: BytesIO, progress_cb=None, max_workers: int =
         raise ValueError(f"Excel must have columns: {required}")
 
     # ensure columns exist
-    # add_cols = _row_template().keys()
+    add_cols = _row_template().keys()
     # for c in add_cols:
     #     if c not in df.columns:
     #         df[c] = ""
