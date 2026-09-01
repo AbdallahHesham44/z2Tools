@@ -8,7 +8,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from fuzzywuzzy import fuzz
 import logging
+import urllib3
 
+# Handle SSL certificate verification issue
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # =========================
 # ⚙️ CONFIG
 # =========================
@@ -47,7 +50,7 @@ def download_pdf(url):
 
     for _ in range(MAX_RETRIES):
         try:
-            r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT, stream=True)
+            r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT, stream=True,verify=False)
 
             if r.status_code == 200:
                 content = r.content
