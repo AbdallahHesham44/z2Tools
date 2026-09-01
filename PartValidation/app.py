@@ -4,7 +4,10 @@ import requests
 import pdfplumber
 import io
 import re
+import urllib3
 
+# Handle SSL certificate verification issue
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 st.set_page_config(page_title="PN & Family Validator", layout="wide")
 
 st.title("📄 PartNumber & Family Validator")
@@ -57,7 +60,7 @@ def search_part_number(part_number, pdf_text_lower):
 def search_pdf(pdf_url, part_number, family):
 
     try:
-        response = requests.get(pdf_url, timeout=20)
+        response = requests.get(pdf_url, timeout=20,verify=False)
         response.raise_for_status()
     except:
         return {
