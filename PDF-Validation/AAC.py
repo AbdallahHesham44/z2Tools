@@ -20,9 +20,12 @@ from io import BytesIO
 
 import fitz  # PyMuPDF
 import pandas as pd
-import requests
 import streamlit as st
+import requests
+import urllib3
 
+# Handle SSL certificate verification issue
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ─── CONFIG ──────────────────────────────────────────────────────────────
 MAX_WORKERS        = 10          # default #threads; expose in sidebar slider
 PROCESSING_VERSION = "v1.3"      # bump whenever logic changes (forces re-cache)
@@ -137,7 +140,7 @@ def download_pdf(session: requests.Session, url: str, cache_dir: str, max_attemp
             os.remove(local_path)
     for attempt in range(1, max_attempts + 1):
         try:
-            r = session.get(url, timeout=60)
+            r = session.get(url, timeout=60, verify=False)
             r.raise_for_status()
             with open(local_path, "wb") as f:
                 f.write(r.content)
